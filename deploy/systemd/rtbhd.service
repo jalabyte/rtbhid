@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=rtbhd
-Group=rtbhd
-# Needed when RTBH_BIRD_COMMAND talks to bird control socket
+Group=bird
+# Keep supplementary group for compatibility.
 SupplementaryGroups=bird
 EnvironmentFile=-/etc/default/rtbhd
 WorkingDirectory=/var/lib/rtbhd
@@ -15,6 +15,7 @@ ExecStart=/usr/local/bin/rtbhd
 Restart=on-failure
 RestartSec=3s
 LimitNOFILE=65536
+UMask=0027
 
 # Hardening
 NoNewPrivileges=true

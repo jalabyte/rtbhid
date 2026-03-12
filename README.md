@@ -144,3 +144,4 @@ IP tunggal otomatis dinormalisasi menjadi `/32` (IPv4) atau `/128` (IPv6).
 - Disarankan tetap gunakan reverse proxy (TLS, allow-list, rate limit) di depan dashboard/API.
 - Pastikan file output Bird berada di path yang bisa di-include Bird.
 - Aktifkan `RTBH_BIRD_RELOAD=true` hanya jika `birdc` tersedia di host.
+- Jika Bird error `Permission denied` saat include file, pastikan `/var/lib/rtbhd` bisa diakses user/group `bird` (lihat `deploy/systemd/README.md`).

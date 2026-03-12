@@ -40,7 +40,14 @@ if ! id -u rtbhd >/dev/null 2>&1; then
   useradd --system --home-dir /var/lib/rtbhd --shell "$NOLOGIN_BIN" rtbhd
 fi
 
-install -d -m 0750 -o rtbhd -g rtbhd /var/lib/rtbhd
+if getent group bird >/dev/null 2>&1; then
+  RTBHD_DATA_GROUP="bird"
+else
+  RTBHD_DATA_GROUP="rtbhd"
+  echo "Warning: group 'bird' not found; using group 'rtbhd' for /var/lib/rtbhd"
+fi
+
+install -d -m 2750 -o rtbhd -g "$RTBHD_DATA_GROUP" /var/lib/rtbhd
 install -m 0755 "$BIN_SRC" "$BIN_DST"
 install -m 0644 "$SERVICE_SRC" "$SERVICE_DST"
 
