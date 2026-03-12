@@ -64,7 +64,7 @@
     }
     .kpi {
       display: grid;
-      grid-template-columns: repeat(3, minmax(60px, 1fr));
+      grid-template-columns: repeat(4, minmax(60px, 1fr));
       gap: 8px;
     }
     .box {
@@ -76,13 +76,14 @@
     .box .v { font-size: 22px; font-weight: 700; }
     .box .l { font-size: 12px; color: var(--muted); }
     form { display: grid; gap: 8px; margin-bottom: 8px; }
-    input, button {
+    input, button, textarea {
       border-radius: 8px;
       border: 1px solid var(--line);
       padding: 8px;
       font-size: 14px;
       font-family: inherit;
     }
+    textarea { min-height: 100px; }
     button {
       background: var(--accent);
       color: #fff;
@@ -124,6 +125,7 @@
     .userbox { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
     .userbox strong { color: var(--ink); }
     #logout-btn { padding: 6px 10px; font-size: 12px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   </style>
 </head>
 <body>
@@ -131,7 +133,7 @@
     <div class="top">
       <div>
         <h1>RTBH Controller</h1>
-        <div class="sub">Centralized blackhole feed manager with per-source sync policy</div>
+        <div class="sub">Centralized blackhole feed manager with source sync and peer automation</div>
       </div>
       <div class="userbox">
         <span id="user-meta">Authenticated</span>
@@ -141,14 +143,16 @@
   </header>
 
   <main>
-    <section class="panel">
+    <section class="panel wide">
       <h2>Status</h2>
       <div class="kpi">
         <div class="box"><div id="kpi-effective" class="v">0</div><div class="l">Effective Prefixes</div></div>
         <div class="box"><div id="kpi-manual" class="v">0</div><div class="l">Manual Prefixes</div></div>
         <div class="box"><div id="kpi-sources" class="v">0</div><div class="l">Sources</div></div>
+        <div class="box"><div id="kpi-peers" class="v">0</div><div class="l">Peers</div></div>
       </div>
       <p class="hint" id="apply-meta">Last apply: -</p>
+      <p class="hint" id="asn-meta">Local ASN: -</p>
     </section>
 
     <section class="panel">
@@ -161,6 +165,18 @@
         <thead><tr><th>Prefix</th><th>Status</th><th>Action</th></tr></thead>
         <tbody id="manual-table"></tbody>
       </table>
+    </section>
+
+    <section class="panel">
+      <h2>BGP Peer (Single)</h2>
+      <form id="peer-form">
+        <input id="peer-name" placeholder="Peer name" required />
+        <input id="peer-neighbor" placeholder="Neighbor IP (e.g. 198.51.100.2)" required />
+        <input id="peer-asn" type="number" min="1" placeholder="Neighbor ASN" required />
+        <input id="peer-multihop" type="number" min="1" value="1" placeholder="Multihop" required />
+        <button type="submit">Add Peer</button>
+      </form>
+      <p class="hint">Opsional password/description bisa di-set via API patch.</p>
     </section>
 
     <section class="panel wide">
@@ -180,6 +196,23 @@
         </thead>
         <tbody id="source-table"></tbody>
       </table>
+    </section>
+
+    <section class="panel wide">
+      <h2>BGP Peers (Bulk + List)</h2>
+      <div class="grid-2">
+        <form id="peer-bulk-form">
+          <label class="hint">Bulk format per line: <code>name,neighbor_ip,neighbor_asn</code></label>
+          <textarea id="peer-bulk-text" placeholder="ix-a,198.51.100.2,64512\nix-b,203.0.113.3,64513"></textarea>
+          <button type="submit">Bulk Add Peers</button>
+        </form>
+        <div>
+          <table>
+            <thead><tr><th>Name</th><th>Neighbor</th><th>ASN</th><th>State</th><th>Action</th></tr></thead>
+            <tbody id="peer-table"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <section class="panel wide">
@@ -226,18 +259,21 @@
     });
 
     async function refresh() {
-      const [status, prefixes, sources, events] = await Promise.all([
+      const [status, prefixes, sources, peers, events] = await Promise.all([
         api('/api/v1/status'),
         api('/api/v1/prefixes'),
         api('/api/v1/sources'),
+        api('/api/v1/peers'),
         api('/api/v1/events?limit=120')
       ]);
 
       document.getElementById('kpi-effective').textContent = status.effective_prefix_count;
       document.getElementById('kpi-manual').textContent = status.manual_prefix_count;
       document.getElementById('kpi-sources').textContent = status.source_count;
-      const apply = status.last_apply_time ? `${status.last_apply_time} | route: ${status.last_apply_result?.route_count ?? 0}` : '-';
+      document.getElementById('kpi-peers').textContent = status.peer_count;
+      const apply = status.last_apply_time ? `${status.last_apply_time} | routes: ${status.last_apply_result?.route_count ?? 0} | peers: ${status.last_apply_result?.peer_count ?? 0}` : '-';
       document.getElementById('apply-meta').textContent = 'Last apply: ' + apply;
+      document.getElementById('asn-meta').textContent = 'Local ASN: ' + (status.local_asn || '-');
 
       const manualBody = document.getElementById('manual-table');
       manualBody.innerHTML = '';
@@ -270,6 +306,22 @@
             <button class="warn" data-act="delete-src" data-id="${s.id}">Delete</button>
           </td>`;
         srcBody.appendChild(tr);
+      }
+
+      const peerBody = document.getElementById('peer-table');
+      peerBody.innerHTML = '';
+      for (const p of peers.items || []) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${p.name}<br><span class="hint">${p.family || '-'}</span></td>
+          <td>${p.neighbor}</td>
+          <td>${p.neighbor_asn}</td>
+          <td><span class="pill ${p.enabled ? '' : 'off'}">${p.enabled ? 'active' : 'inactive'}</span></td>
+          <td class="actions">
+            <button class="secondary" data-act="toggle-peer" data-id="${p.id}" data-enabled="${!p.enabled}">${p.enabled ? 'Disable' : 'Enable'}</button>
+            <button class="warn" data-act="delete-peer" data-id="${p.id}">Delete</button>
+          </td>`;
+        peerBody.appendChild(tr);
       }
 
       const evWrap = document.getElementById('events');
@@ -333,6 +385,58 @@
       }
       if (act === 'delete-src') {
         await api(`/api/v1/sources/${id}`, { method: 'DELETE' });
+      }
+      await refresh();
+    });
+
+    document.getElementById('peer-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const payload = {
+        name: document.getElementById('peer-name').value.trim(),
+        neighbor: document.getElementById('peer-neighbor').value.trim(),
+        neighbor_asn: Number(document.getElementById('peer-asn').value || '0'),
+        multihop: Number(document.getElementById('peer-multihop').value || '1'),
+        enabled: true
+      };
+      await api('/api/v1/peers', { method: 'POST', body: JSON.stringify(payload) });
+      document.getElementById('peer-name').value = '';
+      document.getElementById('peer-neighbor').value = '';
+      document.getElementById('peer-asn').value = '';
+      document.getElementById('peer-multihop').value = '1';
+      await refresh();
+    });
+
+    document.getElementById('peer-bulk-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const raw = document.getElementById('peer-bulk-text').value || '';
+      const lines = raw.split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+      const items = [];
+      for (const line of lines) {
+        const parts = line.split(',').map(v => v.trim());
+        if (parts.length < 3) continue;
+        const asn = Number(parts[2]);
+        if (!parts[0] || !parts[1] || !asn) continue;
+        items.push({ name: parts[0], neighbor: parts[1], neighbor_asn: asn, enabled: true, multihop: 1 });
+      }
+      if (!items.length) {
+        alert('Format bulk tidak valid. Gunakan: name,neighbor_ip,neighbor_asn');
+        return;
+      }
+      await api('/api/v1/peers/bulk', { method: 'POST', body: JSON.stringify({ items }) });
+      document.getElementById('peer-bulk-text').value = '';
+      await refresh();
+    });
+
+    document.getElementById('peer-table').addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('button');
+      if (!btn) return;
+      const act = btn.dataset.act;
+      const id = btn.dataset.id;
+      if (act === 'toggle-peer') {
+        await api(`/api/v1/peers/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled: btn.dataset.enabled === 'true' }) });
+      }
+      if (act === 'delete-peer') {
+        await api(`/api/v1/peers/${id}`, { method: 'DELETE' });
       }
       await refresh();
     });

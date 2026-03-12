@@ -335,6 +335,10 @@ func (s *Service) ListPeers() []state.BGPPeer {
 }
 
 func (s *Service) CreatePeer(in PeerCreateInput) (state.BGPPeer, error) {
+	return s.createPeerInternal(in, true)
+}
+
+func (s *Service) createPeerInternal(in PeerCreateInput, doReconcile bool) (state.BGPPeer, error) {
 	if in.Name == "" {
 		return state.BGPPeer{}, errors.New("name is required")
 	}
@@ -366,18 +370,23 @@ func (s *Service) CreatePeer(in PeerCreateInput) (state.BGPPeer, error) {
 		return state.BGPPeer{}, err
 	}
 	_ = s.store.AddEvent("info", "peer created", persisted.ID)
-	s.reconcile("peer-create", persisted.ID)
+	if doReconcile {
+		s.reconcile("peer-create", persisted.ID)
+	}
 	return persisted, nil
 }
 
 func (s *Service) BulkCreatePeers(items []PeerCreateInput) ([]state.BGPPeer, error) {
 	created := make([]state.BGPPeer, 0, len(items))
 	for i, item := range items {
-		peer, err := s.CreatePeer(item)
+		peer, err := s.createPeerInternal(item, false)
 		if err != nil {
 			return nil, fmt.Errorf("bulk item %d: %w", i+1, err)
 		}
 		created = append(created, peer)
+	}
+	if len(created) > 0 {
+		s.reconcile("peer-bulk-create", "")
 	}
 	return created, nil
 }

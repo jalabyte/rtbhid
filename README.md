@@ -4,6 +4,7 @@
 
 - Manajemen prefix manual (add/delete/enable/disable) untuk blackhole.
 - Sinkronisasi prefix dari banyak remote URL.
+- Manajemen BGP peer RTBH terpusat (single/bulk) tanpa edit manual `bird.conf` per peer.
 - Pengaturan interval auto-sync berbeda per source.
 - Aktivasi/deaktivasi source tanpa menghapus konfigurasi source.
 - Export konfigurasi Bird 2/3 secara otomatis.
@@ -13,7 +14,7 @@
 
 - **Single binary**: API + scheduler + dashboard.
 - **State**: JSON file lokal (`RTBH_STATE_PATH`).
-- **BGP/RTBH plane**: Bird 2/3 tetap menjadi route daemon. `rtbhd` hanya generate include file route blackhole dan opsional menjalankan `birdc configure`.
+- **BGP/RTBH plane**: Bird 2/3 tetap menjadi route daemon. `rtbhd` generate include file route blackhole + BGP peers, lalu opsional menjalankan `birdc configure`.
 
 ## Menjalankan
 
@@ -25,7 +26,8 @@ Default:
 
 - Dashboard/API: `http://127.0.0.1:8080`
 - State file: `./data/state.json`
-- Bird include output: `./data/rtbh_auto.conf`
+- Bird route include output: `./data/rtbh_auto.conf`
+- Bird peer include output: `./data/rtbh_peers_auto.conf`
 
 ## Deploy Dengan systemd
 
@@ -50,8 +52,10 @@ Lalu edit `/etc/default/rtbhd` sesuai environment produksi Anda.
 - `RTBH_LISTEN_ADDR` (default `:8080`)
 - `RTBH_STATE_PATH` (default `./data/state.json`)
 - `RTBH_BIRD_OUTPUT` (default `./data/rtbh_auto.conf`)
+- `RTBH_BIRD_PEERS_OUTPUT` (default `./data/rtbh_peers_auto.conf`)
 - `RTBH_BIRD_RELOAD` (default `false`)
 - `RTBH_BIRD_COMMAND` (default `birdc configure`)
+- `RTBH_LOCAL_ASN` (default `65500`)
 - `RTBH_SYNC_USER_AGENT` (default `rtbhd/1.0`)
 - `RTBH_SCHEDULER_TICK_SECONDS` (default `15`)
 - `RTBH_AUTH_USER` (default empty, auth disabled)
@@ -74,6 +78,7 @@ Tambahkan include pada konfigurasi utama Bird:
 
 ```bird
 include "/absolute/path/to/data/rtbh_auto.conf";
+include "/absolute/path/to/data/rtbh_peers_auto.conf";
 ```
 
 Lalu pastikan ada sesi BGP untuk announce komunitas RTBH sesuai policy jaringan Anda.
@@ -112,6 +117,11 @@ Opsional:
 - `PATCH /api/v1/sources/{id}`
 - `POST /api/v1/sources/{id}/sync`
 - `DELETE /api/v1/sources/{id}`
+- `GET /api/v1/peers`
+- `POST /api/v1/peers`
+- `POST /api/v1/peers/bulk` body `{ "items": [...] }`
+- `PATCH /api/v1/peers/{id}`
+- `DELETE /api/v1/peers/{id}`
 
 ## Format Remote List
 

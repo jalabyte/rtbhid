@@ -295,8 +295,8 @@ func (s *Store) UpsertPeer(peer BGPPeer) (BGPPeer, error) {
 	if strings.TrimSpace(peer.Name) == "" {
 		return BGPPeer{}, errors.New("peer name is required")
 	}
-	if peer.NeighborASN <= 0 || peer.NeighborASN > 4294967295 {
-		return BGPPeer{}, errors.New("neighbor_asn must be between 1 and 4294967295")
+	if peer.NeighborASN <= 0 {
+		return BGPPeer{}, errors.New("neighbor_asn must be > 0")
 	}
 	if peer.Multihop <= 0 {
 		peer.Multihop = 1

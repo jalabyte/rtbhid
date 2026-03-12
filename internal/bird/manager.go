@@ -248,6 +248,6 @@ func renderPeers(peers []Peer, localASN int) []byte {
 }
 
 func escapeBirdString(in string) string {
-	replacer := strings.NewReplacer(`\\`, `\\\\`, `"`, `\\"`)
+	replacer := strings.NewReplacer("\\", "\\\\", "\"", "\\\"")
 	return replacer.Replace(in)
 }

@@ -38,10 +38,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/health", s.handleHealth)
 	mux.HandleFunc("/api/v1/status", s.handleStatus)
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
+
 	mux.HandleFunc("/api/v1/prefixes", s.handlePrefixes)
 	mux.HandleFunc("/api/v1/prefixes/", s.handlePrefixByID)
 	mux.HandleFunc("/api/v1/sources", s.handleSources)
 	mux.HandleFunc("/api/v1/sources/", s.handleSourceByID)
+	mux.HandleFunc("/api/v1/peers", s.handlePeers)
+	mux.HandleFunc("/api/v1/peers/bulk", s.handlePeerBulk)
+	mux.HandleFunc("/api/v1/peers/", s.handlePeerByID)
 
 	return withLogging(withCORS(s.auth.requireAuth(mux)))
 }
@@ -280,6 +284,86 @@ func (s *Server) handleSourceByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, item)
 	case http.MethodDelete:
 		err := s.svc.DeleteSource(id)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"items": s.svc.ListPeers()})
+	case http.MethodPost:
+		var req app.PeerCreateInput
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		peer, err := s.svc.CreatePeer(req)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, peer)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handlePeerBulk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		Items []app.PeerCreateInput `json:"items"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if len(req.Items) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("items is required"))
+		return
+	}
+	created, err := s.svc.BulkCreatePeers(req.Items)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"items": created})
+}
+
+func (s *Server) handlePeerByID(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/peers/")
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodPatch:
+		var req app.PeerPatchInput
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		peer, err := s.svc.PatchPeer(id, req)
+		if err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "not found") {
+				status = http.StatusNotFound
+			}
+			writeError(w, status, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, peer)
+	case http.MethodDelete:
+		err := s.svc.DeletePeer(id)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err)
 			return

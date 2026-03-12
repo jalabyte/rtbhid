@@ -42,6 +42,7 @@ Tambahkan pada `bird.conf`:
 
 ```bird
 include "/var/lib/rtbhd/rtbh_auto.conf";
+include "/var/lib/rtbhd/rtbh_peers_auto.conf";
 ```
 
 Pastikan Bird bisa membaca file include tersebut.
