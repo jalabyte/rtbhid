@@ -35,6 +35,7 @@ Penting:
 
 - set `RTBH_AUTH_USER` dan `RTBH_AUTH_PASS` untuk mengaktifkan login dashboard/API.
 - jika endpoint dipublish HTTPS langsung, set `RTBH_AUTH_COOKIE_SECURE=true`.
+- set `RTBH_EXPORT_STD_COMMUNITIES` / `RTBH_EXPORT_LARGE_COMMUNITIES` jika perlu tag komunitas otomatis saat export RTBH.
 
 ## 4) Konfigurasi Bird
 

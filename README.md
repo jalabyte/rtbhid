@@ -56,6 +56,8 @@ Lalu edit `/etc/default/rtbhd` sesuai environment produksi Anda.
 - `RTBH_BIRD_RELOAD` (default `false`)
 - `RTBH_BIRD_COMMAND` (default `birdc configure`)
 - `RTBH_LOCAL_ASN` (default `65500`)
+- `RTBH_EXPORT_STD_COMMUNITIES` (contoh `65535:666`)
+- `RTBH_EXPORT_LARGE_COMMUNITIES` (contoh `65500:666:1,65500:666:2`)
 - `RTBH_SYNC_USER_AGENT` (default `rtbhd/1.0`)
 - `RTBH_SCHEDULER_TICK_SECONDS` (default `15`)
 - `RTBH_AUTH_USER` (default empty, auth disabled)
@@ -100,6 +102,17 @@ Opsional:
 
 - `RTBH_AUTH_SESSION_SECRET` untuk secret statik lintas restart.
 - `RTBH_AUTH_COOKIE_SECURE=true` jika service diakses via HTTPS.
+
+## Export Community Tag
+
+Untuk menambahkan community tag otomatis ke semua route RTBH yang diexport ke peers:
+
+```bash
+export RTBH_EXPORT_STD_COMMUNITIES='65535:666'
+export RTBH_EXPORT_LARGE_COMMUNITIES='65500:666:1,65500:666:2'
+```
+
+Keduanya opsional dan bisa dipakai bersamaan.
 
 ## API Ringkas
 

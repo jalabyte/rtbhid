@@ -25,8 +25,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("init state: %v", err)
 	}
+	exportPolicy, err := bird.ParseExportPolicy(cfg.ExportStdComms, cfg.ExportLargeComms)
+	if err != nil {
+		log.Fatalf("parse export communities: %v", err)
+	}
 	fetcher := syncer.NewFetcher(cfg.SyncUserAgent)
-	birdManager := bird.NewManager(cfg.BirdOutputPath, cfg.BirdPeersOutput, cfg.BirdReloadEnabled, cfg.BirdCommand)
+	birdManager := bird.NewManager(cfg.BirdOutputPath, cfg.BirdPeersOutput, cfg.BirdReloadEnabled, cfg.BirdCommand, exportPolicy)
 	service := app.NewService(store, fetcher, birdManager, cfg.SchedulerTickSec, cfg.LocalASN)
 	httpServer, err := httpapi.NewServer(service, httpapi.AuthConfig{
 		Enabled:       cfg.AuthEnabled,
@@ -63,6 +67,8 @@ func main() {
 	fmt.Printf("bird peers output: %s\n", cfg.BirdPeersOutput)
 	fmt.Printf("bird reload: %v (cmd: %v)\n", cfg.BirdReloadEnabled, cfg.BirdCommand)
 	fmt.Printf("local asn: %d\n", cfg.LocalASN)
+	fmt.Printf("export std communities: %s\n", cfg.ExportStdComms)
+	fmt.Printf("export large communities: %s\n", cfg.ExportLargeComms)
 	fmt.Printf("auth enabled: %v\n", cfg.AuthEnabled)
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

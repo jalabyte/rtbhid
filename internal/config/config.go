@@ -14,6 +14,8 @@ type Config struct {
 	BirdReloadEnabled bool
 	BirdCommand       []string
 	LocalASN          int
+	ExportStdComms    string
+	ExportLargeComms  string
 	SyncUserAgent     string
 	SchedulerTickSec  int
 	AuthEnabled       bool
@@ -26,13 +28,15 @@ type Config struct {
 
 func Load() Config {
 	cfg := Config{
-		ListenAddr:        getEnv("RTBH_LISTEN_ADDR", ":8088"),
+		ListenAddr:        getEnv("RTBH_LISTEN_ADDR", ":8080"),
 		StatePath:         getEnv("RTBH_STATE_PATH", "./data/state.json"),
 		BirdOutputPath:    getEnv("RTBH_BIRD_OUTPUT", "./data/rtbh_auto.conf"),
 		BirdPeersOutput:   getEnv("RTBH_BIRD_PEERS_OUTPUT", "./data/rtbh_peers_auto.conf"),
 		BirdReloadEnabled: getEnvBool("RTBH_BIRD_RELOAD", false),
 		BirdCommand:       strings.Fields(getEnv("RTBH_BIRD_COMMAND", "birdc configure")),
 		LocalASN:          getEnvInt("RTBH_LOCAL_ASN", 65500),
+		ExportStdComms:    getEnv("RTBH_EXPORT_STD_COMMUNITIES", ""),
+		ExportLargeComms:  getEnv("RTBH_EXPORT_LARGE_COMMUNITIES", ""),
 		SyncUserAgent:     getEnv("RTBH_SYNC_USER_AGENT", "rtbhd/1.0"),
 		SchedulerTickSec:  getEnvInt("RTBH_SCHEDULER_TICK_SECONDS", 15),
 		AuthUsername:      getEnv("RTBH_AUTH_USER", ""),
