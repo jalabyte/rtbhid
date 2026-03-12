@@ -1,0 +1,30 @@
+[Unit]
+Description=RTBH Central Controller (rtbhd)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rtbhd
+Group=rtbhd
+# Needed when RTBH_BIRD_COMMAND talks to bird control socket
+SupplementaryGroups=bird
+EnvironmentFile=-/etc/default/rtbhd
+WorkingDirectory=/var/lib/rtbhd
+ExecStart=/usr/local/bin/rtbhd
+Restart=on-failure
+RestartSec=3s
+LimitNOFILE=65536
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/rtbhd
+
+[Install]
+WantedBy=multi-user.target
