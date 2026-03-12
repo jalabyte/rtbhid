@@ -34,12 +34,14 @@ func (s *Store) load() error {
 	defer s.mu.Unlock()
 
 	s.data = Data{
-		ManualPrefixes: map[string]ManualPrefix{},
-		Sources:        map[string]Source{},
-		SourcePrefixes: map[string]map[string]any{},
-		Peers:          map[string]BGPPeer{},
-		Excluded:       map[string]ExcludedPrefix{},
-		Events:         []Event{},
+		ManualPrefixes:        map[string]ManualPrefix{},
+		Sources:               map[string]Source{},
+		SourcePrefixes:        map[string]map[string]any{},
+		ExcludeSources:        map[string]Source{},
+		ExcludeSourcePrefixes: map[string]map[string]any{},
+		Peers:                 map[string]BGPPeer{},
+		Excluded:              map[string]ExcludedPrefix{},
+		Events:                []Event{},
 	}
 
 	raw, err := os.ReadFile(s.path)
@@ -63,6 +65,12 @@ func (s *Store) load() error {
 	}
 	if s.data.SourcePrefixes == nil {
 		s.data.SourcePrefixes = map[string]map[string]any{}
+	}
+	if s.data.ExcludeSources == nil {
+		s.data.ExcludeSources = map[string]Source{}
+	}
+	if s.data.ExcludeSourcePrefixes == nil {
+		s.data.ExcludeSourcePrefixes = map[string]map[string]any{}
 	}
 	if s.data.Peers == nil {
 		s.data.Peers = map[string]BGPPeer{}
@@ -291,6 +299,97 @@ func (s *Store) SetSourcePrefixes(sourceID string, prefixes []string) error {
 	return s.persistLocked()
 }
 
+func (s *Store) UpsertExcludeSource(src Source) (Source, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	existing, ok := s.data.ExcludeSources[src.ID]
+	if !ok {
+		src.CreatedAt = now
+	} else {
+		src.CreatedAt = existing.CreatedAt
+		src.LastSyncAt = existing.LastSyncAt
+		src.LastSuccessAt = existing.LastSuccessAt
+		src.LastError = existing.LastError
+		src.LastCount = existing.LastCount
+	}
+	src.UpdatedAt = now
+	s.data.ExcludeSources[src.ID] = src
+	if _, exists := s.data.ExcludeSourcePrefixes[src.ID]; !exists {
+		s.data.ExcludeSourcePrefixes[src.ID] = map[string]any{}
+	}
+	return src, s.persistLocked()
+}
+
+func (s *Store) DeleteExcludeSource(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.data.ExcludeSources, id)
+	delete(s.data.ExcludeSourcePrefixes, id)
+	return s.persistLocked()
+}
+
+func (s *Store) GetExcludeSource(id string) (Source, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	src, ok := s.data.ExcludeSources[id]
+	return src, ok
+}
+
+func (s *Store) ListExcludeSources() []Source {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]Source, 0, len(s.data.ExcludeSources))
+	for _, v := range s.data.ExcludeSources {
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func (s *Store) TouchExcludeSourceSyncResult(id string, count int, syncErr error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	src, ok := s.data.ExcludeSources[id]
+	if !ok {
+		return fmt.Errorf("exclude source %s not found", id)
+	}
+	now := time.Now().UTC()
+	src.LastSyncAt = &now
+	src.LastCount = count
+	if syncErr != nil {
+		src.LastError = syncErr.Error()
+	} else {
+		src.LastError = ""
+		src.LastSuccessAt = &now
+	}
+	src.UpdatedAt = now
+	s.data.ExcludeSources[id] = src
+	return s.persistLocked()
+}
+
+func (s *Store) SetExcludeSourcePrefixes(sourceID string, prefixes []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.data.ExcludeSources[sourceID]; !ok {
+		return fmt.Errorf("exclude source %s not found", sourceID)
+	}
+	set := map[string]any{}
+	for _, p := range prefixes {
+		set[p] = struct{}{}
+	}
+	s.data.ExcludeSourcePrefixes[sourceID] = set
+	return s.persistLocked()
+}
+
 func (s *Store) UpsertPeer(peer BGPPeer) (BGPPeer, error) {
 	neighbor, family, err := NormalizeNeighbor(peer.Neighbor)
 	if err != nil {
@@ -414,6 +513,17 @@ func (s *Store) EffectivePrefixes() []string {
 			}
 		}
 	}
+	for id, src := range s.data.ExcludeSources {
+		if !src.Enabled {
+			continue
+		}
+		for p := range s.data.ExcludeSourcePrefixes[id] {
+			excluded[p] = struct{}{}
+			if pref, err := netip.ParsePrefix(p); err == nil {
+				excludedCIDRs = append(excludedCIDRs, pref.Masked())
+			}
+		}
+	}
 
 	set := map[string]any{}
 	for p, v := range s.data.ManualPrefixes {
@@ -463,6 +573,12 @@ func (s *Store) SourcePrefixCount(sourceID string) int {
 	return len(s.data.SourcePrefixes[sourceID])
 }
 
+func (s *Store) ExcludeSourcePrefixCount(sourceID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.data.ExcludeSourcePrefixes[sourceID])
+}
+
 func (s *Store) TotalManualCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -479,4 +595,10 @@ func (s *Store) TotalExcludedCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.data.Excluded)
+}
+
+func (s *Store) TotalExcludeSourceCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.data.ExcludeSources)
 }

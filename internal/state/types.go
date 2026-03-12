@@ -54,10 +54,12 @@ type Event struct {
 }
 
 type Data struct {
-	ManualPrefixes map[string]ManualPrefix   `json:"manual_prefixes"`
-	Sources        map[string]Source         `json:"sources"`
-	SourcePrefixes map[string]map[string]any `json:"source_prefixes"`
-	Peers          map[string]BGPPeer        `json:"peers"`
-	Excluded       map[string]ExcludedPrefix `json:"excluded"`
-	Events         []Event                   `json:"events"`
+	ManualPrefixes        map[string]ManualPrefix   `json:"manual_prefixes"`
+	Sources               map[string]Source         `json:"sources"`
+	SourcePrefixes        map[string]map[string]any `json:"source_prefixes"`
+	ExcludeSources        map[string]Source         `json:"exclude_sources"`
+	ExcludeSourcePrefixes map[string]map[string]any `json:"exclude_source_prefixes"`
+	Peers                 map[string]BGPPeer        `json:"peers"`
+	Excluded              map[string]ExcludedPrefix `json:"excluded"`
+	Events                []Event                   `json:"events"`
 }

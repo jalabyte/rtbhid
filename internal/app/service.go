@@ -30,6 +30,22 @@ type SourcePatchInput struct {
 	TimeoutSeconds  *int    `json:"timeout_seconds,omitempty"`
 }
 
+type ExcludeSourceCreateInput struct {
+	Name            string `json:"name"`
+	URL             string `json:"url"`
+	Enabled         bool   `json:"enabled"`
+	IntervalSeconds int    `json:"interval_seconds"`
+	TimeoutSeconds  int    `json:"timeout_seconds"`
+}
+
+type ExcludeSourcePatchInput struct {
+	Name            *string `json:"name,omitempty"`
+	URL             *string `json:"url,omitempty"`
+	Enabled         *bool   `json:"enabled,omitempty"`
+	IntervalSeconds *int    `json:"interval_seconds,omitempty"`
+	TimeoutSeconds  *int    `json:"timeout_seconds,omitempty"`
+}
+
 type PeerCreateInput struct {
 	Name        string `json:"name"`
 	Neighbor    string `json:"neighbor"`
@@ -55,6 +71,7 @@ type Status struct {
 	ManualPrefixCount    int               `json:"manual_prefix_count"`
 	ExcludedPrefixCount  int               `json:"excluded_prefix_count"`
 	SourceCount          int               `json:"source_count"`
+	ExcludeSourceCount   int               `json:"exclude_source_count"`
 	PeerCount            int               `json:"peer_count"`
 	LocalASN             int               `json:"local_asn"`
 	LastApplyTime        *time.Time        `json:"last_apply_time,omitempty"`
@@ -70,10 +87,15 @@ type Service struct {
 
 	mu           sync.Mutex
 	runningSyncs map[string]bool
-	triggerCh    chan string
+	triggerCh    chan syncJob
 	reconcileMu  sync.Mutex
 	lastApplyAt  *time.Time
 	lastApplyRes *bird.ApplyResult
+}
+
+type syncJob struct {
+	kind string
+	id   string
 }
 
 func NewService(store *state.Store, fetcher *syncer.Fetcher, birdManager *bird.Manager, tickSec, localASN int) *Service {
@@ -90,7 +112,7 @@ func NewService(store *state.Store, fetcher *syncer.Fetcher, birdManager *bird.M
 		localASN:      localASN,
 		schedulerTick: time.Duration(tickSec) * time.Second,
 		runningSyncs:  map[string]bool{},
-		triggerCh:     make(chan string, 128),
+		triggerCh:     make(chan syncJob, 128),
 	}
 }
 
@@ -107,8 +129,8 @@ func (s *Service) schedulerLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case id := <-s.triggerCh:
-			s.runSyncAsync(ctx, id)
+		case job := <-s.triggerCh:
+			s.runSyncAsync(ctx, job.kind, job.id)
 		case <-ticker.C:
 			now := time.Now().UTC()
 			sources := s.store.ListSources()
@@ -120,53 +142,98 @@ func (s *Service) schedulerLoop(ctx context.Context) {
 					src.IntervalSeconds = 300
 				}
 				if src.LastSyncAt == nil || now.Sub(*src.LastSyncAt) >= time.Duration(src.IntervalSeconds)*time.Second {
-					s.runSyncAsync(ctx, src.ID)
+					s.runSyncAsync(ctx, "source", src.ID)
+				}
+			}
+			excludeSources := s.store.ListExcludeSources()
+			for _, src := range excludeSources {
+				if !src.Enabled {
+					continue
+				}
+				if src.IntervalSeconds < 10 {
+					src.IntervalSeconds = 300
+				}
+				if src.LastSyncAt == nil || now.Sub(*src.LastSyncAt) >= time.Duration(src.IntervalSeconds)*time.Second {
+					s.runSyncAsync(ctx, "exclude_source", src.ID)
 				}
 			}
 		}
 	}
 }
 
-func (s *Service) runSyncAsync(ctx context.Context, sourceID string) {
+func (s *Service) runSyncAsync(ctx context.Context, kind, sourceID string) {
+	key := kind + ":" + sourceID
 	s.mu.Lock()
-	if s.runningSyncs[sourceID] {
+	if s.runningSyncs[key] {
 		s.mu.Unlock()
 		return
 	}
-	s.runningSyncs[sourceID] = true
+	s.runningSyncs[key] = true
 	s.mu.Unlock()
 
 	go func() {
 		defer func() {
 			s.mu.Lock()
-			delete(s.runningSyncs, sourceID)
+			delete(s.runningSyncs, key)
 			s.mu.Unlock()
 		}()
 
-		src, ok := s.store.GetSource(sourceID)
+		ok := false
+		var url string
+		timeout := 30
+		switch kind {
+		case "source":
+			sobj, exists := s.store.GetSource(sourceID)
+			if !exists || !sobj.Enabled {
+				return
+			}
+			url = sobj.URL
+			timeout = sobj.TimeoutSeconds
+			ok = true
+		case "exclude_source":
+			sobj, exists := s.store.GetExcludeSource(sourceID)
+			if !exists || !sobj.Enabled {
+				return
+			}
+			url = sobj.URL
+			timeout = sobj.TimeoutSeconds
+			ok = true
+		}
 		if !ok {
 			return
 		}
-		if !src.Enabled {
-			return
-		}
 
-		prefixes, err := s.fetcher.Fetch(ctx, src.URL, src.TimeoutSeconds)
+		prefixes, err := s.fetcher.Fetch(ctx, url, timeout)
 		if err != nil {
-			_ = s.store.TouchSourceSyncResult(sourceID, s.store.SourcePrefixCount(sourceID), err)
-			_ = s.store.AddEvent("error", fmt.Sprintf("sync failed: %v", err), sourceID)
+			if kind == "source" {
+				_ = s.store.TouchSourceSyncResult(sourceID, s.store.SourcePrefixCount(sourceID), err)
+			} else {
+				_ = s.store.TouchExcludeSourceSyncResult(sourceID, s.store.ExcludeSourcePrefixCount(sourceID), err)
+			}
+			_ = s.store.AddEvent("error", fmt.Sprintf("%s sync failed: %v", kind, err), sourceID)
 			return
 		}
-		if err := s.store.SetSourcePrefixes(sourceID, prefixes); err != nil {
-			_ = s.store.AddEvent("error", fmt.Sprintf("failed to save source prefixes: %v", err), sourceID)
-			return
+		if kind == "source" {
+			if err := s.store.SetSourcePrefixes(sourceID, prefixes); err != nil {
+				_ = s.store.AddEvent("error", fmt.Sprintf("failed to save source prefixes: %v", err), sourceID)
+				return
+			}
+			if err := s.store.TouchSourceSyncResult(sourceID, len(prefixes), nil); err != nil {
+				_ = s.store.AddEvent("error", fmt.Sprintf("failed to update source sync status: %v", err), sourceID)
+				return
+			}
+		} else {
+			if err := s.store.SetExcludeSourcePrefixes(sourceID, prefixes); err != nil {
+				_ = s.store.AddEvent("error", fmt.Sprintf("failed to save exclude source prefixes: %v", err), sourceID)
+				return
+			}
+			if err := s.store.TouchExcludeSourceSyncResult(sourceID, len(prefixes), nil); err != nil {
+				_ = s.store.AddEvent("error", fmt.Sprintf("failed to update exclude source sync status: %v", err), sourceID)
+				return
+			}
 		}
-		if err := s.store.TouchSourceSyncResult(sourceID, len(prefixes), nil); err != nil {
-			_ = s.store.AddEvent("error", fmt.Sprintf("failed to update sync status: %v", err), sourceID)
-			return
-		}
-		_ = s.store.AddEvent("info", fmt.Sprintf("sync success: %d prefixes", len(prefixes)), sourceID)
-		s.reconcile("sync", sourceID)
+		_ = s.store.AddEvent("info", fmt.Sprintf("%s sync success: %d prefixes", kind, len(prefixes)), sourceID)
+		s.reconcile("sync-"+kind, sourceID)
 	}()
 }
 
@@ -210,9 +277,17 @@ func (s *Service) reconcile(reason, sourceID string) {
 
 func (s *Service) TriggerSync(sourceID string) {
 	select {
-	case s.triggerCh <- sourceID:
+	case s.triggerCh <- syncJob{kind: "source", id: sourceID}:
 	default:
-		go func() { s.triggerCh <- sourceID }()
+		go func() { s.triggerCh <- syncJob{kind: "source", id: sourceID} }()
+	}
+}
+
+func (s *Service) TriggerExcludeSync(sourceID string) {
+	select {
+	case s.triggerCh <- syncJob{kind: "exclude_source", id: sourceID}:
+	default:
+		go func() { s.triggerCh <- syncJob{kind: "exclude_source", id: sourceID} }()
 	}
 }
 
@@ -352,6 +427,98 @@ func (s *Service) SyncNow(id string) error {
 	return nil
 }
 
+func (s *Service) ListExcludeSources() []state.Source {
+	return s.store.ListExcludeSources()
+}
+
+func (s *Service) CreateExcludeSource(in ExcludeSourceCreateInput) (state.Source, error) {
+	if in.Name == "" {
+		return state.Source{}, errors.New("name is required")
+	}
+	if in.URL == "" {
+		return state.Source{}, errors.New("url is required")
+	}
+	if in.IntervalSeconds <= 0 {
+		in.IntervalSeconds = 300
+	}
+	if in.TimeoutSeconds <= 0 {
+		in.TimeoutSeconds = 30
+	}
+	src := state.Source{
+		ID:              newResourceID("xsrc"),
+		Name:            in.Name,
+		URL:             in.URL,
+		Enabled:         in.Enabled,
+		IntervalSeconds: in.IntervalSeconds,
+		TimeoutSeconds:  in.TimeoutSeconds,
+	}
+	persisted, err := s.store.UpsertExcludeSource(src)
+	if err != nil {
+		return state.Source{}, err
+	}
+	_ = s.store.AddEvent("info", "exclude source created", persisted.ID)
+	if persisted.Enabled {
+		s.TriggerExcludeSync(persisted.ID)
+	}
+	s.reconcile("exclude-source-create", persisted.ID)
+	return persisted, nil
+}
+
+func (s *Service) PatchExcludeSource(id string, patch ExcludeSourcePatchInput) (state.Source, error) {
+	src, ok := s.store.GetExcludeSource(id)
+	if !ok {
+		return state.Source{}, fmt.Errorf("exclude source %s not found", id)
+	}
+	if patch.Name != nil {
+		src.Name = *patch.Name
+	}
+	if patch.URL != nil {
+		src.URL = *patch.URL
+	}
+	if patch.Enabled != nil {
+		src.Enabled = *patch.Enabled
+	}
+	if patch.IntervalSeconds != nil {
+		if *patch.IntervalSeconds <= 0 {
+			return state.Source{}, errors.New("interval_seconds must be > 0")
+		}
+		src.IntervalSeconds = *patch.IntervalSeconds
+	}
+	if patch.TimeoutSeconds != nil {
+		if *patch.TimeoutSeconds <= 0 {
+			return state.Source{}, errors.New("timeout_seconds must be > 0")
+		}
+		src.TimeoutSeconds = *patch.TimeoutSeconds
+	}
+	persisted, err := s.store.UpsertExcludeSource(src)
+	if err != nil {
+		return state.Source{}, err
+	}
+	_ = s.store.AddEvent("info", "exclude source updated", id)
+	if persisted.Enabled {
+		s.TriggerExcludeSync(id)
+	}
+	s.reconcile("exclude-source-patch", id)
+	return persisted, nil
+}
+
+func (s *Service) DeleteExcludeSource(id string) error {
+	if err := s.store.DeleteExcludeSource(id); err != nil {
+		return err
+	}
+	_ = s.store.AddEvent("info", "exclude source deleted", id)
+	s.reconcile("exclude-source-delete", id)
+	return nil
+}
+
+func (s *Service) SyncExcludeNow(id string) error {
+	if _, ok := s.store.GetExcludeSource(id); !ok {
+		return fmt.Errorf("exclude source %s not found", id)
+	}
+	s.TriggerExcludeSync(id)
+	return nil
+}
+
 func (s *Service) ListPeers() []state.BGPPeer {
 	return s.store.ListPeers()
 }
@@ -459,6 +626,7 @@ func (s *Service) DeletePeer(id string) error {
 
 func (s *Service) Status() Status {
 	sources := s.store.ListSources()
+	excludeSources := s.store.ListExcludeSources()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -467,6 +635,7 @@ func (s *Service) Status() Status {
 		ManualPrefixCount:    s.store.TotalManualCount(),
 		ExcludedPrefixCount:  s.store.TotalExcludedCount(),
 		SourceCount:          len(sources),
+		ExcludeSourceCount:   len(excludeSources),
 		PeerCount:            s.store.TotalPeerCount(),
 		LocalASN:             s.localASN,
 		LastApplyTime:        s.lastApplyAt,

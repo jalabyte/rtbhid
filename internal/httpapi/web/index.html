@@ -64,7 +64,7 @@
     }
     .kpi {
       display: grid;
-      grid-template-columns: repeat(5, minmax(60px, 1fr));
+      grid-template-columns: repeat(6, minmax(60px, 1fr));
       gap: 8px;
     }
     .box {
@@ -150,6 +150,7 @@
         <div class="box"><div id="kpi-manual" class="v">0</div><div class="l">Manual Prefixes</div></div>
         <div class="box"><div id="kpi-excludes" class="v">0</div><div class="l">Excluded Prefixes</div></div>
         <div class="box"><div id="kpi-sources" class="v">0</div><div class="l">Sources</div></div>
+        <div class="box"><div id="kpi-exclude-sources" class="v">0</div><div class="l">Exclude Sources</div></div>
         <div class="box"><div id="kpi-peers" class="v">0</div><div class="l">Peers</div></div>
       </div>
       <p class="hint" id="apply-meta">Last apply: -</p>
@@ -209,6 +210,25 @@
           </tr>
         </thead>
         <tbody id="source-table"></tbody>
+      </table>
+    </section>
+
+    <section class="panel wide">
+      <h2>Remote Exclude Sources</h2>
+      <form id="exclude-source-form" style="grid-template-columns: 1fr 2fr 150px 150px auto; align-items: end;">
+        <input id="xsrc-name" placeholder="Exclude source name" required />
+        <input id="xsrc-url" placeholder="https://example.com/exclude.txt" required />
+        <input id="xsrc-interval" type="number" min="10" value="300" placeholder="Interval sec" required />
+        <input id="xsrc-timeout" type="number" min="5" value="30" placeholder="Timeout sec" required />
+        <button type="submit">Create Exclude Source</button>
+      </form>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th>URL</th><th>Schedule</th><th>State</th><th>Last Sync</th><th>Prefixes</th><th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="exclude-source-table"></tbody>
       </table>
     </section>
 
@@ -273,11 +293,12 @@
     });
 
     async function refresh() {
-      const [status, prefixes, excludes, sources, peers, events] = await Promise.all([
+      const [status, prefixes, excludes, sources, excludeSources, peers, events] = await Promise.all([
         api('/api/v1/status'),
         api('/api/v1/prefixes'),
         api('/api/v1/excludes'),
         api('/api/v1/sources'),
+        api('/api/v1/exclude-sources'),
         api('/api/v1/peers'),
         api('/api/v1/events?limit=120')
       ]);
@@ -286,6 +307,7 @@
       document.getElementById('kpi-manual').textContent = status.manual_prefix_count;
       document.getElementById('kpi-excludes').textContent = status.excluded_prefix_count;
       document.getElementById('kpi-sources').textContent = status.source_count;
+      document.getElementById('kpi-exclude-sources').textContent = status.exclude_source_count || 0;
       document.getElementById('kpi-peers').textContent = status.peer_count;
       const apply = status.last_apply_time ? `${status.last_apply_time} | routes: ${status.last_apply_result?.route_count ?? 0} | peers: ${status.last_apply_result?.peer_count ?? 0}` : '-';
       document.getElementById('apply-meta').textContent = 'Last apply: ' + apply;
@@ -337,6 +359,25 @@
             <button class="warn" data-act="delete-src" data-id="${s.id}">Delete</button>
           </td>`;
         srcBody.appendChild(tr);
+      }
+
+      const xsrcBody = document.getElementById('exclude-source-table');
+      xsrcBody.innerHTML = '';
+      for (const s of excludeSources.items || []) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${s.name}</td>
+          <td style="word-break:break-all">${s.url}</td>
+          <td>${s.interval_seconds}s / ${s.timeout_seconds}s</td>
+          <td><span class="pill ${s.enabled ? '' : 'off'}">${s.enabled ? 'active' : 'inactive'}</span></td>
+          <td>${s.last_sync_at || '-'}${s.last_error ? `<br><span style="color:#af3e3e">${s.last_error}</span>` : ''}</td>
+          <td>${s.last_count || 0}</td>
+          <td class="actions">
+            <button class="secondary" data-act="sync-xsrc" data-id="${s.id}">Sync now</button>
+            <button data-act="toggle-xsrc" data-id="${s.id}" data-enabled="${!s.enabled}">${s.enabled ? 'Deactivate' : 'Activate'}</button>
+            <button class="warn" data-act="delete-xsrc" data-id="${s.id}">Delete</button>
+          </td>`;
+        xsrcBody.appendChild(tr);
       }
 
       const peerBody = document.getElementById('peer-table');
@@ -448,6 +489,38 @@
       }
       if (act === 'delete-src') {
         await api(`/api/v1/sources/${id}`, { method: 'DELETE' });
+      }
+      await refresh();
+    });
+
+    document.getElementById('exclude-source-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const payload = {
+        name: document.getElementById('xsrc-name').value.trim(),
+        url: document.getElementById('xsrc-url').value.trim(),
+        interval_seconds: Number(document.getElementById('xsrc-interval').value || '300'),
+        timeout_seconds: Number(document.getElementById('xsrc-timeout').value || '30'),
+        enabled: true
+      };
+      await api('/api/v1/exclude-sources', { method: 'POST', body: JSON.stringify(payload) });
+      document.getElementById('xsrc-name').value = '';
+      document.getElementById('xsrc-url').value = '';
+      await refresh();
+    });
+
+    document.getElementById('exclude-source-table').addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('button');
+      if (!btn) return;
+      const act = btn.dataset.act;
+      const id = btn.dataset.id;
+      if (act === 'sync-xsrc') {
+        await api(`/api/v1/exclude-sources/${id}/sync`, { method: 'POST' });
+      }
+      if (act === 'toggle-xsrc') {
+        await api(`/api/v1/exclude-sources/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled: btn.dataset.enabled === 'true' }) });
+      }
+      if (act === 'delete-xsrc') {
+        await api(`/api/v1/exclude-sources/${id}`, { method: 'DELETE' });
       }
       await refresh();
     });

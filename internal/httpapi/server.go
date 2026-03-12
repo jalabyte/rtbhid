@@ -45,6 +45,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/excludes/", s.handleExcludeByID)
 	mux.HandleFunc("/api/v1/sources", s.handleSources)
 	mux.HandleFunc("/api/v1/sources/", s.handleSourceByID)
+	mux.HandleFunc("/api/v1/exclude-sources", s.handleExcludeSources)
+	mux.HandleFunc("/api/v1/exclude-sources/", s.handleExcludeSourceByID)
 	mux.HandleFunc("/api/v1/peers", s.handlePeers)
 	mux.HandleFunc("/api/v1/peers/bulk", s.handlePeerBulk)
 	mux.HandleFunc("/api/v1/peers/", s.handlePeerByID)
@@ -339,6 +341,76 @@ func (s *Server) handleSourceByID(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		err := s.svc.DeleteSource(id)
 		if err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleExcludeSources(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"items": s.svc.ListExcludeSources()})
+	case http.MethodPost:
+		var req app.ExcludeSourceCreateInput
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		item, err := s.svc.CreateExcludeSource(req)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, item)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleExcludeSourceByID(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/exclude-sources/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	id := parts[0]
+
+	if len(parts) == 2 && parts[1] == "sync" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		if err := s.svc.SyncExcludeNow(id); err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"scheduled": true})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPatch:
+		var req app.ExcludeSourcePatchInput
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		item, err := s.svc.PatchExcludeSource(id, req)
+		if err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "not found") {
+				status = http.StatusNotFound
+			}
+			writeError(w, status, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, item)
+	case http.MethodDelete:
+		if err := s.svc.DeleteExcludeSource(id); err != nil {
 			writeError(w, http.StatusNotFound, err)
 			return
 		}
