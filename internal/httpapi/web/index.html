@@ -64,7 +64,7 @@
     }
     .kpi {
       display: grid;
-      grid-template-columns: repeat(4, minmax(60px, 1fr));
+      grid-template-columns: repeat(5, minmax(60px, 1fr));
       gap: 8px;
     }
     .box {
@@ -148,6 +148,7 @@
       <div class="kpi">
         <div class="box"><div id="kpi-effective" class="v">0</div><div class="l">Effective Prefixes</div></div>
         <div class="box"><div id="kpi-manual" class="v">0</div><div class="l">Manual Prefixes</div></div>
+        <div class="box"><div id="kpi-excludes" class="v">0</div><div class="l">Excluded Prefixes</div></div>
         <div class="box"><div id="kpi-sources" class="v">0</div><div class="l">Sources</div></div>
         <div class="box"><div id="kpi-peers" class="v">0</div><div class="l">Peers</div></div>
       </div>
@@ -177,6 +178,19 @@
         <button type="submit">Add Peer</button>
       </form>
       <p class="hint">Opsional password/description bisa di-set via API patch.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Exclude List</h2>
+      <form id="exclude-form">
+        <input id="exclude-prefix" placeholder="203.0.113.0/24 or 203.0.113.5" required />
+        <input id="exclude-reason" placeholder="Reason (optional): false positive, DNS/CDN, internal IP" />
+        <button type="submit">Add Exclude</button>
+      </form>
+      <table>
+        <thead><tr><th>Prefix</th><th>Reason</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody id="exclude-table"></tbody>
+      </table>
     </section>
 
     <section class="panel wide">
@@ -259,9 +273,10 @@
     });
 
     async function refresh() {
-      const [status, prefixes, sources, peers, events] = await Promise.all([
+      const [status, prefixes, excludes, sources, peers, events] = await Promise.all([
         api('/api/v1/status'),
         api('/api/v1/prefixes'),
+        api('/api/v1/excludes'),
         api('/api/v1/sources'),
         api('/api/v1/peers'),
         api('/api/v1/events?limit=120')
@@ -269,6 +284,7 @@
 
       document.getElementById('kpi-effective').textContent = status.effective_prefix_count;
       document.getElementById('kpi-manual').textContent = status.manual_prefix_count;
+      document.getElementById('kpi-excludes').textContent = status.excluded_prefix_count;
       document.getElementById('kpi-sources').textContent = status.source_count;
       document.getElementById('kpi-peers').textContent = status.peer_count;
       const apply = status.last_apply_time ? `${status.last_apply_time} | routes: ${status.last_apply_result?.route_count ?? 0} | peers: ${status.last_apply_result?.peer_count ?? 0}` : '-';
@@ -287,6 +303,21 @@
             <button class="warn" data-act="delete" data-prefix="${encodeURIComponent(p.prefix)}">Delete</button>
           </td>`;
         manualBody.appendChild(tr);
+      }
+
+      const excludeBody = document.getElementById('exclude-table');
+      excludeBody.innerHTML = '';
+      for (const p of excludes.items || []) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${p.prefix}</td>
+          <td>${p.reason || '-'}</td>
+          <td><span class="pill ${p.enabled ? '' : 'off'}">${p.enabled ? 'enabled' : 'disabled'}</span></td>
+          <td class="actions">
+            <button class="secondary" data-act="toggle-exclude" data-prefix="${encodeURIComponent(p.prefix)}" data-reason="${(p.reason || '').replace(/\"/g, '&quot;')}" data-enabled="${!p.enabled}">${p.enabled ? 'Disable' : 'Enable'}</button>
+            <button class="warn" data-act="delete-exclude" data-prefix="${encodeURIComponent(p.prefix)}">Delete</button>
+          </td>`;
+        excludeBody.appendChild(tr);
       }
 
       const srcBody = document.getElementById('source-table');
@@ -353,6 +384,38 @@
       }
       if (act === 'toggle') {
         await api('/api/v1/prefixes', { method: 'POST', body: JSON.stringify({ prefix, enabled: btn.dataset.enabled === 'true' }) });
+      }
+      await refresh();
+    });
+
+    document.getElementById('exclude-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const prefix = document.getElementById('exclude-prefix').value.trim();
+      const reason = document.getElementById('exclude-reason').value.trim();
+      if (!prefix) return;
+      await api('/api/v1/excludes', { method: 'POST', body: JSON.stringify({ prefix, reason, enabled: true }) });
+      document.getElementById('exclude-prefix').value = '';
+      document.getElementById('exclude-reason').value = '';
+      await refresh();
+    });
+
+    document.getElementById('exclude-table').addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('button');
+      if (!btn) return;
+      const act = btn.dataset.act;
+      const prefix = decodeURIComponent(btn.dataset.prefix || '');
+      if (act === 'delete-exclude') {
+        await api('/api/v1/excludes/' + encodeURIComponent(prefix), { method: 'DELETE' });
+      }
+      if (act === 'toggle-exclude') {
+        await api('/api/v1/excludes', {
+          method: 'POST',
+          body: JSON.stringify({
+            prefix,
+            reason: btn.dataset.reason || '',
+            enabled: btn.dataset.enabled === 'true'
+          })
+        });
       }
       await refresh();
     });

@@ -5,6 +5,7 @@
 - Manajemen prefix manual (add/delete/enable/disable) untuk blackhole.
 - Sinkronisasi prefix dari banyak remote URL.
 - Manajemen BGP peer RTBH terpusat (single/bulk) tanpa edit manual `bird.conf` per peer.
+- Exclude list untuk menahan false-positive dari list provider (mis. IP internal/DNS/CDN).
 - Pengaturan interval auto-sync berbeda per source.
 - Aktivasi/deaktivasi source tanpa menghapus konfigurasi source.
 - Export konfigurasi Bird 2/3 secara otomatis.
@@ -125,6 +126,9 @@ Keduanya opsional dan bisa dipakai bersamaan.
 - `GET /api/v1/prefixes`
 - `POST /api/v1/prefixes` body `{ "prefix": "203.0.113.1", "enabled": true }`
 - `DELETE /api/v1/prefixes/{prefix}`
+- `GET /api/v1/excludes`
+- `POST /api/v1/excludes` body `{ "prefix": "203.0.113.1", "reason": "false-positive", "enabled": true }`
+- `DELETE /api/v1/excludes/{prefix}`
 - `GET /api/v1/sources`
 - `POST /api/v1/sources`
 - `PATCH /api/v1/sources/{id}`
@@ -150,6 +154,12 @@ Contoh:
 ```
 
 IP tunggal otomatis dinormalisasi menjadi `/32` (IPv4) atau `/128` (IPv6).
+
+## Exclude List Behavior
+
+- Prefix yang ada di exclude list akan dibuang dari hasil sinkronisasi source provider.
+- Exclude bersifat CIDR-aware: jika exclude `1.1.1.0/24`, maka route seperti `1.1.1.1/32` ikut dibuang.
+- Manual prefix tetap bisa Anda gunakan untuk override darurat meskipun prefix itu ada di exclude list.
 
 ## Catatan Produksi
 

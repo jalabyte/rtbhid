@@ -28,7 +28,7 @@ type Config struct {
 
 func Load() Config {
 	cfg := Config{
-		ListenAddr:        getEnv("RTBH_LISTEN_ADDR", ":8080"),
+		ListenAddr:        getEnv("RTBH_LISTEN_ADDR", ":8088"),
 		StatePath:         getEnv("RTBH_STATE_PATH", "./data/state.json"),
 		BirdOutputPath:    getEnv("RTBH_BIRD_OUTPUT", "./data/rtbh_auto.conf"),
 		BirdPeersOutput:   getEnv("RTBH_BIRD_PEERS_OUTPUT", "./data/rtbh_peers_auto.conf"),

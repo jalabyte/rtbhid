@@ -38,6 +38,7 @@ func (s *Store) load() error {
 		Sources:        map[string]Source{},
 		SourcePrefixes: map[string]map[string]any{},
 		Peers:          map[string]BGPPeer{},
+		Excluded:       map[string]ExcludedPrefix{},
 		Events:         []Event{},
 	}
 
@@ -65,6 +66,9 @@ func (s *Store) load() error {
 	}
 	if s.data.Peers == nil {
 		s.data.Peers = map[string]BGPPeer{}
+	}
+	if s.data.Excluded == nil {
+		s.data.Excluded = map[string]ExcludedPrefix{}
 	}
 	if s.data.Events == nil {
 		s.data.Events = []Event{}
@@ -349,9 +353,67 @@ func (s *Store) ListPeers() []BGPPeer {
 	return out
 }
 
+func (s *Store) UpsertExcludedPrefix(prefix string, enabled bool, reason string) (ExcludedPrefix, error) {
+	norm, err := NormalizePrefix(prefix)
+	if err != nil {
+		return ExcludedPrefix{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	existing, ok := s.data.Excluded[norm]
+	if !ok {
+		existing = ExcludedPrefix{Prefix: norm, CreatedAt: now}
+	}
+	existing.Enabled = enabled
+	existing.Reason = strings.TrimSpace(reason)
+	existing.UpdatedAt = now
+	s.data.Excluded[norm] = existing
+	return existing, s.persistLocked()
+}
+
+func (s *Store) DeleteExcludedPrefix(prefix string) error {
+	norm, err := NormalizePrefix(prefix)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.data.Excluded, norm)
+	return s.persistLocked()
+}
+
+func (s *Store) ListExcludedPrefixes() []ExcludedPrefix {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]ExcludedPrefix, 0, len(s.data.Excluded))
+	for _, v := range s.data.Excluded {
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Prefix < out[j].Prefix
+	})
+	return out
+}
+
 func (s *Store) EffectivePrefixes() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	excluded := map[string]any{}
+	excludedCIDRs := make([]netip.Prefix, 0, len(s.data.Excluded))
+	for p, e := range s.data.Excluded {
+		if e.Enabled {
+			excluded[p] = struct{}{}
+			if pref, err := netip.ParsePrefix(p); err == nil {
+				excludedCIDRs = append(excludedCIDRs, pref.Masked())
+			}
+		}
+	}
 
 	set := map[string]any{}
 	for p, v := range s.data.ManualPrefixes {
@@ -364,6 +426,12 @@ func (s *Store) EffectivePrefixes() []string {
 			continue
 		}
 		for p := range s.data.SourcePrefixes[id] {
+			if _, blocked := excluded[p]; blocked {
+				continue
+			}
+			if pref, err := netip.ParsePrefix(p); err == nil && isExcludedByCIDR(pref, excludedCIDRs) {
+				continue
+			}
 			set[p] = struct{}{}
 		}
 	}
@@ -373,6 +441,20 @@ func (s *Store) EffectivePrefixes() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func isExcludedByCIDR(target netip.Prefix, excluded []netip.Prefix) bool {
+	target = target.Masked()
+	for _, ex := range excluded {
+		// Exclude when target is equal/more-specific inside excluded CIDR.
+		if ex.Addr().Is4() != target.Addr().Is4() {
+			continue
+		}
+		if ex.Bits() <= target.Bits() && ex.Contains(target.Addr()) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) SourcePrefixCount(sourceID string) int {
@@ -391,4 +473,10 @@ func (s *Store) TotalPeerCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.data.Peers)
+}
+
+func (s *Store) TotalExcludedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.data.Excluded)
 }

@@ -41,6 +41,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("/api/v1/prefixes", s.handlePrefixes)
 	mux.HandleFunc("/api/v1/prefixes/", s.handlePrefixByID)
+	mux.HandleFunc("/api/v1/excludes", s.handleExcludes)
+	mux.HandleFunc("/api/v1/excludes/", s.handleExcludeByID)
 	mux.HandleFunc("/api/v1/sources", s.handleSources)
 	mux.HandleFunc("/api/v1/sources/", s.handleSourceByID)
 	mux.HandleFunc("/api/v1/peers", s.handlePeers)
@@ -214,6 +216,58 @@ func (s *Server) handlePrefixByID(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		err := s.svc.DeleteManualPrefix(prefix)
 		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleExcludes(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"items": s.svc.ListExcludedPrefixes()})
+	case http.MethodPost:
+		var req struct {
+			Prefix  string `json:"prefix"`
+			Reason  string `json:"reason"`
+			Enabled *bool  `json:"enabled"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		enabled := true
+		if req.Enabled != nil {
+			enabled = *req.Enabled
+		}
+		item, err := s.svc.UpsertExcludedPrefix(req.Prefix, enabled, req.Reason)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, item)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleExcludeByID(w http.ResponseWriter, r *http.Request) {
+	prefixEscaped := strings.TrimPrefix(r.URL.Path, "/api/v1/excludes/")
+	if prefixEscaped == "" {
+		http.NotFound(w, r)
+		return
+	}
+	prefix, err := url.PathUnescape(prefixEscaped)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.svc.DeleteExcludedPrefix(prefix); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}

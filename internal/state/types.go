@@ -38,6 +38,14 @@ type BGPPeer struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type ExcludedPrefix struct {
+	Prefix    string    `json:"prefix"`
+	Reason    string    `json:"reason,omitempty"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Event struct {
 	Time     time.Time `json:"time"`
 	Level    string    `json:"level"`
@@ -50,5 +58,6 @@ type Data struct {
 	Sources        map[string]Source         `json:"sources"`
 	SourcePrefixes map[string]map[string]any `json:"source_prefixes"`
 	Peers          map[string]BGPPeer        `json:"peers"`
+	Excluded       map[string]ExcludedPrefix `json:"excluded"`
 	Events         []Event                   `json:"events"`
 }

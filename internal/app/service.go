@@ -53,6 +53,7 @@ type PeerPatchInput struct {
 type Status struct {
 	EffectivePrefixCount int               `json:"effective_prefix_count"`
 	ManualPrefixCount    int               `json:"manual_prefix_count"`
+	ExcludedPrefixCount  int               `json:"excluded_prefix_count"`
 	SourceCount          int               `json:"source_count"`
 	PeerCount            int               `json:"peer_count"`
 	LocalASN             int               `json:"local_asn"`
@@ -233,6 +234,27 @@ func (s *Service) DeleteManualPrefix(prefix string) error {
 		return err
 	}
 	s.reconcile("manual-delete", "")
+	return nil
+}
+
+func (s *Service) ListExcludedPrefixes() []state.ExcludedPrefix {
+	return s.store.ListExcludedPrefixes()
+}
+
+func (s *Service) UpsertExcludedPrefix(prefix string, enabled bool, reason string) (state.ExcludedPrefix, error) {
+	entry, err := s.store.UpsertExcludedPrefix(prefix, enabled, reason)
+	if err != nil {
+		return state.ExcludedPrefix{}, err
+	}
+	s.reconcile("exclude-update", "")
+	return entry, nil
+}
+
+func (s *Service) DeleteExcludedPrefix(prefix string) error {
+	if err := s.store.DeleteExcludedPrefix(prefix); err != nil {
+		return err
+	}
+	s.reconcile("exclude-delete", "")
 	return nil
 }
 
@@ -443,6 +465,7 @@ func (s *Service) Status() Status {
 	return Status{
 		EffectivePrefixCount: len(s.store.EffectivePrefixes()),
 		ManualPrefixCount:    s.store.TotalManualCount(),
+		ExcludedPrefixCount:  s.store.TotalExcludedCount(),
 		SourceCount:          len(sources),
 		PeerCount:            s.store.TotalPeerCount(),
 		LocalASN:             s.localASN,
