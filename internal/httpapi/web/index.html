@@ -1,591 +1,912 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RTBH Controller</title>
-  <style>
-    :root {
-      --bg: #f4f1e8;
-      --panel: #fffdf9;
-      --ink: #1f2421;
-      --muted: #65706a;
-      --accent: #136f63;
-      --warn: #af3e3e;
-      --line: #d9d2c3;
-      --glow: #ffe9a8;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-      background: radial-gradient(circle at top right, var(--glow), var(--bg) 50%);
-      color: var(--ink);
-    }
-    header {
-      padding: 18px 24px;
-      border-bottom: 2px solid var(--line);
-      background: linear-gradient(120deg, #fff7d6, #e7f5ef);
-      position: sticky;
-      top: 0;
-      backdrop-filter: blur(2px);
-      z-index: 4;
-    }
-    .top {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    h1 { margin: 0; font-size: 24px; letter-spacing: 0.3px; }
-    .sub { color: var(--muted); margin-top: 4px; font-size: 13px; }
-    main {
-      max-width: 1200px;
-      margin: 16px auto;
-      padding: 0 16px 24px;
-      display: grid;
-      gap: 16px;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    }
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 16px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-    }
-    .panel h2 {
-      margin-top: 0;
-      margin-bottom: 10px;
-      font-size: 18px;
-      border-left: 4px solid var(--accent);
-      padding-left: 8px;
-    }
-    .kpi {
-      display: grid;
-      grid-template-columns: repeat(6, minmax(60px, 1fr));
-      gap: 8px;
-    }
-    .box {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 10px;
-      background: #fff;
-    }
-    .box .v { font-size: 22px; font-weight: 700; }
-    .box .l { font-size: 12px; color: var(--muted); }
-    form { display: grid; gap: 8px; margin-bottom: 8px; }
-    input, button, textarea {
-      border-radius: 8px;
-      border: 1px solid var(--line);
-      padding: 8px;
-      font-size: 14px;
-      font-family: inherit;
-    }
-    textarea { min-height: 100px; }
-    button {
-      background: var(--accent);
-      color: #fff;
-      border-color: transparent;
-      cursor: pointer;
-      transition: transform .08s ease;
-    }
-    button:hover { transform: translateY(-1px); }
-    button.secondary { background: #56615b; }
-    button.warn { background: var(--warn); }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-    th, td {
-      border-bottom: 1px solid var(--line);
-      text-align: left;
-      padding: 7px 4px;
-      vertical-align: top;
-    }
-    th { color: var(--muted); }
-    .pill {
-      display: inline-block;
-      border-radius: 999px;
-      padding: 2px 8px;
-      font-size: 11px;
-      font-weight: 700;
-      background: #e5f5f1;
-      color: #0a4f47;
-    }
-    .pill.off { background: #f0e9e9; color: #783535; }
-    .events { max-height: 320px; overflow: auto; font-size: 13px; }
-    .event { border-bottom: 1px dashed var(--line); padding: 7px 2px; }
-    .event .meta { color: var(--muted); font-size: 12px; }
-    .hint { color: var(--muted); font-size: 12px; }
-    .wide { grid-column: 1 / -1; }
-    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
-    .userbox { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
-    .userbox strong { color: var(--ink); }
-    #logout-btn { padding: 6px 10px; font-size: 12px; }
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  </style>
-</head>
-<body>
-  <header>
-    <div class="top">
-      <div>
-        <h1>RTBH Controller</h1>
-        <div class="sub">Centralized blackhole feed manager with source sync and peer automation</div>
-      </div>
-      <div class="userbox">
-        <span id="user-meta">Authenticated</span>
-        <button id="logout-btn" class="secondary" type="button">Logout</button>
-      </div>
-    </div>
-  </header>
-
-  <main>
-    <section class="panel wide">
-      <h2>Status</h2>
-      <div class="kpi">
-        <div class="box"><div id="kpi-effective" class="v">0</div><div class="l">Effective Prefixes</div></div>
-        <div class="box"><div id="kpi-manual" class="v">0</div><div class="l">Manual Prefixes</div></div>
-        <div class="box"><div id="kpi-excludes" class="v">0</div><div class="l">Excluded Prefixes</div></div>
-        <div class="box"><div id="kpi-sources" class="v">0</div><div class="l">Sources</div></div>
-        <div class="box"><div id="kpi-exclude-sources" class="v">0</div><div class="l">Exclude Sources</div></div>
-        <div class="box"><div id="kpi-peers" class="v">0</div><div class="l">Peers</div></div>
-      </div>
-      <p class="hint" id="apply-meta">Last apply: -</p>
-      <p class="hint" id="asn-meta">Local ASN: -</p>
-    </section>
-
-    <section class="panel">
-      <h2>Manual Prefix</h2>
-      <form id="manual-form">
-        <input id="manual-prefix" placeholder="203.0.113.10 or 203.0.113.0/24" required />
-        <button type="submit">Add / Update</button>
-      </form>
-      <table>
-        <thead><tr><th>Prefix</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody id="manual-table"></tbody>
-      </table>
-    </section>
-
-    <section class="panel">
-      <h2>BGP Peer (Single)</h2>
-      <form id="peer-form">
-        <input id="peer-name" placeholder="Peer name" required />
-        <input id="peer-neighbor" placeholder="Neighbor IP (e.g. 198.51.100.2)" required />
-        <input id="peer-asn" type="number" min="1" placeholder="Neighbor ASN" required />
-        <input id="peer-multihop" type="number" min="1" value="1" placeholder="Multihop" required />
-        <button type="submit">Add Peer</button>
-      </form>
-      <p class="hint">Opsional password/description bisa di-set via API patch.</p>
-    </section>
-
-    <section class="panel">
-      <h2>Exclude List</h2>
-      <form id="exclude-form">
-        <input id="exclude-prefix" placeholder="203.0.113.0/24 or 203.0.113.5" required />
-        <input id="exclude-reason" placeholder="Reason (optional): false positive, DNS/CDN, internal IP" />
-        <button type="submit">Add Exclude</button>
-      </form>
-      <table>
-        <thead><tr><th>Prefix</th><th>Reason</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody id="exclude-table"></tbody>
-      </table>
-    </section>
-
-    <section class="panel wide">
-      <h2>Remote Sources</h2>
-      <form id="source-form" style="grid-template-columns: 1fr 2fr 150px 150px auto; align-items: end;">
-        <input id="src-name" placeholder="Source name" required />
-        <input id="src-url" placeholder="https://example.com/rtbh.txt" required />
-        <input id="src-interval" type="number" min="10" value="300" placeholder="Interval sec" required />
-        <input id="src-timeout" type="number" min="5" value="30" placeholder="Timeout sec" required />
-        <button type="submit">Create Source</button>
-      </form>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th><th>URL</th><th>Schedule</th><th>State</th><th>Last Sync</th><th>Prefixes</th><th>Action</th>
-          </tr>
-        </thead>
-        <tbody id="source-table"></tbody>
-      </table>
-    </section>
-
-    <section class="panel wide">
-      <h2>Remote Exclude Sources</h2>
-      <form id="exclude-source-form" style="grid-template-columns: 1fr 2fr 150px 150px auto; align-items: end;">
-        <input id="xsrc-name" placeholder="Exclude source name" required />
-        <input id="xsrc-url" placeholder="https://example.com/exclude.txt" required />
-        <input id="xsrc-interval" type="number" min="10" value="300" placeholder="Interval sec" required />
-        <input id="xsrc-timeout" type="number" min="5" value="30" placeholder="Timeout sec" required />
-        <button type="submit">Create Exclude Source</button>
-      </form>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th><th>URL</th><th>Schedule</th><th>State</th><th>Last Sync</th><th>Prefixes</th><th>Action</th>
-          </tr>
-        </thead>
-        <tbody id="exclude-source-table"></tbody>
-      </table>
-    </section>
-
-    <section class="panel wide">
-      <h2>BGP Peers (Bulk + List)</h2>
-      <div class="grid-2">
-        <form id="peer-bulk-form">
-          <label class="hint">Bulk format per line: <code>name,neighbor_ip,neighbor_asn</code></label>
-          <textarea id="peer-bulk-text" placeholder="ix-a,198.51.100.2,64512\nix-b,203.0.113.3,64513"></textarea>
-          <button type="submit">Bulk Add Peers</button>
-        </form>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RTBH Controller</title>
+    <style>
+      :root {
+        --bg: #f4f1e8;
+        --panel: #fffdf9;
+        --ink: #1f2421;
+        --muted: #65706a;
+        --accent: #136f63;
+        --warn: #af3e3e;
+        --line: #d9d2c3;
+        --glow: #ffe9a8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        background: radial-gradient(
+          circle at top right,
+          var(--glow),
+          var(--bg) 50%
+        );
+        color: var(--ink);
+      }
+      header {
+        padding: 18px 24px;
+        border-bottom: 2px solid var(--line);
+        background: linear-gradient(120deg, #fff7d6, #e7f5ef);
+        position: sticky;
+        top: 0;
+        backdrop-filter: blur(2px);
+        z-index: 4;
+      }
+      .top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      h1 {
+        margin: 0;
+        font-size: 24px;
+        letter-spacing: 0.3px;
+      }
+      .sub {
+        color: var(--muted);
+        margin-top: 4px;
+        font-size: 13px;
+      }
+      main {
+        max-width: 1200px;
+        margin: 16px auto;
+        padding: 0 16px 24px;
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+      }
+      .panel h2 {
+        margin-top: 0;
+        margin-bottom: 10px;
+        font-size: 18px;
+        border-left: 4px solid var(--accent);
+        padding-left: 8px;
+      }
+      .kpi {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(60px, 1fr));
+        gap: 8px;
+      }
+      .box {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        background: #fff;
+      }
+      .box .v {
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .box .l {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      form {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      input,
+      button,
+      textarea {
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        padding: 8px;
+        font-size: 14px;
+        font-family: inherit;
+      }
+      textarea {
+        min-height: 100px;
+      }
+      button {
+        background: var(--accent);
+        color: #fff;
+        border-color: transparent;
+        cursor: pointer;
+        transition: transform 0.08s ease;
+      }
+      button:hover {
+        transform: translateY(-1px);
+      }
+      button.secondary {
+        background: #56615b;
+      }
+      button.warn {
+        background: var(--warn);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        padding: 7px 4px;
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+      }
+      .pill {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 11px;
+        font-weight: 700;
+        background: #e5f5f1;
+        color: #0a4f47;
+      }
+      .pill.off {
+        background: #f0e9e9;
+        color: #783535;
+      }
+      .events {
+        max-height: 320px;
+        overflow: auto;
+        font-size: 13px;
+      }
+      .event {
+        border-bottom: 1px dashed var(--line);
+        padding: 7px 2px;
+      }
+      .event .meta {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .wide {
+        grid-column: 1 / -1;
+      }
+      .actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .userbox {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .userbox strong {
+        color: var(--ink);
+      }
+      #logout-btn {
+        padding: 6px 10px;
+        font-size: 12px;
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="top">
         <div>
-          <table>
-            <thead><tr><th>Name</th><th>Neighbor</th><th>ASN</th><th>State</th><th>Action</th></tr></thead>
-            <tbody id="peer-table"></tbody>
-          </table>
+          <h1>RTBH Controller</h1>
+          <div class="sub">
+            Centralized blackhole feed manager with source sync and peer
+            automation
+          </div>
+        </div>
+        <div class="userbox">
+          <span id="user-meta">Authenticated</span>
+          <button id="logout-btn" class="secondary" type="button">
+            Logout
+          </button>
         </div>
       </div>
-    </section>
+    </header>
 
-    <section class="panel wide">
-      <h2>Events</h2>
-      <div id="events" class="events"></div>
-    </section>
-  </main>
+    <main>
+      <section class="panel wide">
+        <h2>Status</h2>
+        <div class="kpi">
+          <div class="box">
+            <div id="kpi-effective" class="v">0</div>
+            <div class="l">Effective Prefixes</div>
+          </div>
+          <div class="box">
+            <div id="kpi-manual" class="v">0</div>
+            <div class="l">Manual Prefixes</div>
+          </div>
+          <div class="box">
+            <div id="kpi-excludes" class="v">0</div>
+            <div class="l">Excluded Prefixes</div>
+          </div>
+          <div class="box">
+            <div id="kpi-sources" class="v">0</div>
+            <div class="l">Sources</div>
+          </div>
+          <div class="box">
+            <div id="kpi-exclude-sources" class="v">0</div>
+            <div class="l">Exclude Sources</div>
+          </div>
+          <div class="box">
+            <div id="kpi-peers" class="v">0</div>
+            <div class="l">Peers</div>
+          </div>
+        </div>
+        <p class="hint" id="apply-meta">Last apply: -</p>
+        <p class="hint" id="asn-meta">Local ASN: -</p>
+      </section>
 
-  <script>
-    async function loadSession() {
-      const res = await fetch('/api/v1/auth/me', { credentials: 'same-origin' });
-      const body = await res.json().catch(() => ({}));
-      if (res.status === 401 || (body.enabled && !body.logged_in)) {
-        window.location.href = '/login';
-        return false;
+      <section class="panel">
+        <h2>Manual Prefix</h2>
+        <form id="manual-form">
+          <input
+            id="manual-prefix"
+            placeholder="203.0.113.10 or 203.0.113.0/24"
+            required
+          />
+          <button type="submit">Add / Update</button>
+        </form>
+        <table>
+          <thead>
+            <tr>
+              <th>Prefix</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="manual-table"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>BGP Peer (Single)</h2>
+        <form id="peer-form">
+          <input id="peer-name" placeholder="Peer name" required />
+          <input
+            id="peer-neighbor"
+            placeholder="Neighbor IP (e.g. 198.51.100.2)"
+            required
+          />
+          <input
+            id="peer-asn"
+            type="number"
+            min="1"
+            placeholder="Neighbor ASN"
+            required
+          />
+          <input
+            id="peer-multihop"
+            type="number"
+            min="1"
+            value="1"
+            placeholder="Multihop"
+            required
+          />
+          <button type="submit">Add Peer</button>
+        </form>
+        <p class="hint">
+          Opsional password/description bisa di-set via API patch.
+        </p>
+      </section>
+
+      <section class="panel">
+        <h2>Exclude List</h2>
+        <form id="exclude-form">
+          <input
+            id="exclude-prefix"
+            placeholder="203.0.113.0/24 or 203.0.113.5"
+            required
+          />
+          <input
+            id="exclude-reason"
+            placeholder="Reason (optional): false positive, DNS/CDN, internal IP"
+          />
+          <button type="submit">Add Exclude</button>
+        </form>
+        <table>
+          <thead>
+            <tr>
+              <th>Prefix</th>
+              <th>Reason</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="exclude-table"></tbody>
+        </table>
+      </section>
+
+      <section class="panel wide">
+        <h2>Remote Sources</h2>
+        <form
+          id="source-form"
+          style="
+            grid-template-columns: 1fr 2fr 150px 150px auto;
+            align-items: end;
+          "
+        >
+          <input id="src-name" placeholder="Source name" required />
+          <input
+            id="src-url"
+            placeholder="https://example.com/rtbh.txt"
+            required
+          />
+          <input
+            id="src-interval"
+            type="number"
+            min="10"
+            value="300"
+            placeholder="Interval sec"
+            required
+          />
+          <input
+            id="src-timeout"
+            type="number"
+            min="5"
+            value="30"
+            placeholder="Timeout sec"
+            required
+          />
+          <button type="submit">Create Source</button>
+        </form>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>URL</th>
+              <th>Schedule</th>
+              <th>State</th>
+              <th>Last Sync</th>
+              <th>Prefixes</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="source-table"></tbody>
+        </table>
+      </section>
+
+      <section class="panel wide">
+        <h2>Remote Exclude Sources</h2>
+        <form
+          id="exclude-source-form"
+          style="
+            grid-template-columns: 1fr 2fr 150px 150px auto;
+            align-items: end;
+          "
+        >
+          <input id="xsrc-name" placeholder="Exclude source name" required />
+          <input
+            id="xsrc-url"
+            placeholder="https://example.com/exclude.txt"
+            required
+          />
+          <input
+            id="xsrc-interval"
+            type="number"
+            min="10"
+            value="300"
+            placeholder="Interval sec"
+            required
+          />
+          <input
+            id="xsrc-timeout"
+            type="number"
+            min="5"
+            value="30"
+            placeholder="Timeout sec"
+            required
+          />
+          <button type="submit">Create Exclude Source</button>
+        </form>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>URL</th>
+              <th>Schedule</th>
+              <th>State</th>
+              <th>Last Sync</th>
+              <th>Prefixes</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="exclude-source-table"></tbody>
+        </table>
+      </section>
+
+      <section class="panel wide">
+        <h2>BGP Peers (Bulk + List)</h2>
+        <div class="grid-2">
+          <form id="peer-bulk-form">
+            <label class="hint"
+              >Bulk format per line:
+              <code>name,neighbor_ip,neighbor_asn</code></label
+            >
+            <textarea
+              id="peer-bulk-text"
+              placeholder="ix-a,198.51.100.2,64512\nix-b,203.0.113.3,64513"
+            ></textarea>
+            <button type="submit">Bulk Add Peers</button>
+          </form>
+          <div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Neighbor</th>
+                  <th>ASN</th>
+                  <th>State</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="peer-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel wide">
+        <h2>Events</h2>
+        <div id="events" class="events"></div>
+      </section>
+    </main>
+
+    <script>
+      async function loadSession() {
+        const res = await fetch("/api/v1/auth/me", {
+          credentials: "same-origin",
+        });
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 401 || (body.enabled && !body.logged_in)) {
+          window.location.href = "/login";
+          return false;
+        }
+        const meta = document.getElementById("user-meta");
+        const logoutBtn = document.getElementById("logout-btn");
+        if (body.enabled) {
+          meta.textContent = "Signed in as ";
+          const user = document.createElement("strong");
+          user.textContent = body.username || "-";
+          meta.appendChild(user);
+          logoutBtn.style.display = "inline-block";
+        } else {
+          meta.textContent = "Auth disabled";
+          logoutBtn.style.display = "none";
+        }
+        return true;
       }
-      const meta = document.getElementById('user-meta');
-      const logoutBtn = document.getElementById('logout-btn');
-      if (body.enabled) {
-        meta.textContent = 'Signed in as ';
-        const user = document.createElement('strong');
-        user.textContent = body.username || '-';
-        meta.appendChild(user);
-        logoutBtn.style.display = 'inline-block';
-      } else {
-        meta.textContent = 'Auth disabled';
-        logoutBtn.style.display = 'none';
-      }
-      return true;
-    }
 
-    const api = (path, opt = {}) => fetch(path, {
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      ...opt
-    }).then(async r => {
-      const body = await r.json().catch(() => ({}));
-      if (r.status === 401) {
-        window.location.href = '/login';
-        throw new Error('unauthorized');
-      }
-      if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
-      return body;
-    });
+      const api = (path, opt = {}) =>
+        fetch(path, {
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          ...opt,
+        }).then(async (r) => {
+          const body = await r.json().catch(() => ({}));
+          if (r.status === 401) {
+            window.location.href = "/login";
+            throw new Error("unauthorized");
+          }
+          if (!r.ok) throw new Error(body.error || "HTTP " + r.status);
+          return body;
+        });
 
-    async function refresh() {
-      const [status, prefixes, excludes, sources, excludeSources, peers, events] = await Promise.all([
-        api('/api/v1/status'),
-        api('/api/v1/prefixes'),
-        api('/api/v1/excludes'),
-        api('/api/v1/sources'),
-        api('/api/v1/exclude-sources'),
-        api('/api/v1/peers'),
-        api('/api/v1/events?limit=120')
-      ]);
+      async function refresh() {
+        const [
+          status,
+          prefixes,
+          excludes,
+          sources,
+          excludeSources,
+          peers,
+          events,
+        ] = await Promise.all([
+          api("/api/v1/status"),
+          api("/api/v1/prefixes"),
+          api("/api/v1/excludes"),
+          api("/api/v1/sources"),
+          api("/api/v1/exclude-sources"),
+          api("/api/v1/peers"),
+          api("/api/v1/events?limit=120"),
+        ]);
 
-      document.getElementById('kpi-effective').textContent = status.effective_prefix_count;
-      document.getElementById('kpi-manual').textContent = status.manual_prefix_count;
-      document.getElementById('kpi-excludes').textContent = status.excluded_prefix_count;
-      document.getElementById('kpi-sources').textContent = status.source_count;
-      document.getElementById('kpi-exclude-sources').textContent = status.exclude_source_count || 0;
-      document.getElementById('kpi-peers').textContent = status.peer_count;
-      const apply = status.last_apply_time ? `${status.last_apply_time} | routes: ${status.last_apply_result?.route_count ?? 0} | peers: ${status.last_apply_result?.peer_count ?? 0}` : '-';
-      document.getElementById('apply-meta').textContent = 'Last apply: ' + apply;
-      document.getElementById('asn-meta').textContent = 'Local ASN: ' + (status.local_asn || '-');
+        document.getElementById("kpi-effective").textContent =
+          status.effective_prefix_count;
+        document.getElementById("kpi-manual").textContent =
+          status.manual_prefix_count;
+        document.getElementById("kpi-excludes").textContent =
+          status.excluded_prefix_count;
+        document.getElementById("kpi-sources").textContent =
+          status.source_count;
+        document.getElementById("kpi-exclude-sources").textContent =
+          status.exclude_source_count || 0;
+        document.getElementById("kpi-peers").textContent = status.peer_count;
+        const apply = status.last_apply_time
+          ? `${status.last_apply_time} | routes: ${status.last_apply_result?.route_count ?? 0} | peers: ${status.last_apply_result?.peer_count ?? 0}`
+          : "-";
+        document.getElementById("apply-meta").textContent =
+          "Last apply: " + apply;
+        document.getElementById("asn-meta").textContent =
+          "Local ASN: " + (status.local_asn || "-");
 
-      const manualBody = document.getElementById('manual-table');
-      manualBody.innerHTML = '';
-      for (const p of prefixes.items || []) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
+        const manualBody = document.getElementById("manual-table");
+        manualBody.innerHTML = "";
+        for (const p of prefixes.items || []) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
           <td>${p.prefix}</td>
-          <td><span class="pill ${p.enabled ? '' : 'off'}">${p.enabled ? 'enabled' : 'disabled'}</span></td>
+          <td><span class="pill ${p.enabled ? "" : "off"}">${p.enabled ? "enabled" : "disabled"}</span></td>
           <td class="actions">
-            <button class="secondary" data-act="toggle" data-prefix="${encodeURIComponent(p.prefix)}" data-enabled="${!p.enabled}">${p.enabled ? 'Disable' : 'Enable'}</button>
+            <button class="secondary" data-act="toggle" data-prefix="${encodeURIComponent(p.prefix)}" data-enabled="${!p.enabled}">${p.enabled ? "Disable" : "Enable"}</button>
             <button class="warn" data-act="delete" data-prefix="${encodeURIComponent(p.prefix)}">Delete</button>
           </td>`;
-        manualBody.appendChild(tr);
-      }
+          manualBody.appendChild(tr);
+        }
 
-      const excludeBody = document.getElementById('exclude-table');
-      excludeBody.innerHTML = '';
-      for (const p of excludes.items || []) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
+        const excludeBody = document.getElementById("exclude-table");
+        excludeBody.innerHTML = "";
+        for (const p of excludes.items || []) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
           <td>${p.prefix}</td>
-          <td>${p.reason || '-'}</td>
-          <td><span class="pill ${p.enabled ? '' : 'off'}">${p.enabled ? 'enabled' : 'disabled'}</span></td>
+          <td>${p.reason || "-"}</td>
+          <td><span class="pill ${p.enabled ? "" : "off"}">${p.enabled ? "enabled" : "disabled"}</span></td>
           <td class="actions">
-            <button class="secondary" data-act="toggle-exclude" data-prefix="${encodeURIComponent(p.prefix)}" data-reason="${(p.reason || '').replace(/\"/g, '&quot;')}" data-enabled="${!p.enabled}">${p.enabled ? 'Disable' : 'Enable'}</button>
+            <button class="secondary" data-act="toggle-exclude" data-prefix="${encodeURIComponent(p.prefix)}" data-reason="${(p.reason || "").replace(/\"/g, "&quot;")}" data-enabled="${!p.enabled}">${p.enabled ? "Disable" : "Enable"}</button>
             <button class="warn" data-act="delete-exclude" data-prefix="${encodeURIComponent(p.prefix)}">Delete</button>
           </td>`;
-        excludeBody.appendChild(tr);
-      }
+          excludeBody.appendChild(tr);
+        }
 
-      const srcBody = document.getElementById('source-table');
-      srcBody.innerHTML = '';
-      for (const s of sources.items || []) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
+        const srcBody = document.getElementById("source-table");
+        srcBody.innerHTML = "";
+        for (const s of sources.items || []) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
           <td>${s.name}</td>
           <td style="word-break:break-all">${s.url}</td>
           <td>${s.interval_seconds}s / ${s.timeout_seconds}s</td>
-          <td><span class="pill ${s.enabled ? '' : 'off'}">${s.enabled ? 'active' : 'inactive'}</span></td>
-          <td>${s.last_sync_at || '-'}${s.last_error ? `<br><span style="color:#af3e3e">${s.last_error}</span>` : ''}</td>
+          <td><span class="pill ${s.enabled ? "" : "off"}">${s.enabled ? "active" : "inactive"}</span></td>
+          <td>${s.last_sync_at || "-"}${s.last_error ? `<br><span style="color:#af3e3e">${s.last_error}</span>` : ""}</td>
           <td>${s.last_count || 0}</td>
           <td class="actions">
             <button class="secondary" data-act="sync" data-id="${s.id}">Sync now</button>
-            <button data-act="toggle-src" data-id="${s.id}" data-enabled="${!s.enabled}">${s.enabled ? 'Deactivate' : 'Activate'}</button>
+            <button data-act="toggle-src" data-id="${s.id}" data-enabled="${!s.enabled}">${s.enabled ? "Deactivate" : "Activate"}</button>
             <button class="warn" data-act="delete-src" data-id="${s.id}">Delete</button>
           </td>`;
-        srcBody.appendChild(tr);
-      }
+          srcBody.appendChild(tr);
+        }
 
-      const xsrcBody = document.getElementById('exclude-source-table');
-      xsrcBody.innerHTML = '';
-      for (const s of excludeSources.items || []) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
+        const xsrcBody = document.getElementById("exclude-source-table");
+        xsrcBody.innerHTML = "";
+        for (const s of excludeSources.items || []) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
           <td>${s.name}</td>
           <td style="word-break:break-all">${s.url}</td>
           <td>${s.interval_seconds}s / ${s.timeout_seconds}s</td>
-          <td><span class="pill ${s.enabled ? '' : 'off'}">${s.enabled ? 'active' : 'inactive'}</span></td>
-          <td>${s.last_sync_at || '-'}${s.last_error ? `<br><span style="color:#af3e3e">${s.last_error}</span>` : ''}</td>
+          <td><span class="pill ${s.enabled ? "" : "off"}">${s.enabled ? "active" : "inactive"}</span></td>
+          <td>${s.last_sync_at || "-"}${s.last_error ? `<br><span style="color:#af3e3e">${s.last_error}</span>` : ""}</td>
           <td>${s.last_count || 0}</td>
           <td class="actions">
             <button class="secondary" data-act="sync-xsrc" data-id="${s.id}">Sync now</button>
-            <button data-act="toggle-xsrc" data-id="${s.id}" data-enabled="${!s.enabled}">${s.enabled ? 'Deactivate' : 'Activate'}</button>
+            <button data-act="toggle-xsrc" data-id="${s.id}" data-enabled="${!s.enabled}">${s.enabled ? "Deactivate" : "Activate"}</button>
             <button class="warn" data-act="delete-xsrc" data-id="${s.id}">Delete</button>
           </td>`;
-        xsrcBody.appendChild(tr);
-      }
+          xsrcBody.appendChild(tr);
+        }
 
-      const peerBody = document.getElementById('peer-table');
-      peerBody.innerHTML = '';
-      for (const p of peers.items || []) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${p.name}<br><span class="hint">${p.family || '-'}</span></td>
+        const peerBody = document.getElementById("peer-table");
+        peerBody.innerHTML = "";
+        for (const p of peers.items || []) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+          <td>${p.name}<br><span class="hint">${p.family || "-"}</span></td>
           <td>${p.neighbor}</td>
           <td>${p.neighbor_asn}</td>
-          <td><span class="pill ${p.enabled ? '' : 'off'}">${p.enabled ? 'active' : 'inactive'}</span></td>
+          <td><span class="pill ${p.enabled ? "" : "off"}">${p.enabled ? "active" : "inactive"}</span></td>
           <td class="actions">
-            <button class="secondary" data-act="toggle-peer" data-id="${p.id}" data-enabled="${!p.enabled}">${p.enabled ? 'Disable' : 'Enable'}</button>
+            <button class="secondary" data-act="toggle-peer" data-id="${p.id}" data-enabled="${!p.enabled}">${p.enabled ? "Disable" : "Enable"}</button>
             <button class="warn" data-act="delete-peer" data-id="${p.id}">Delete</button>
           </td>`;
-        peerBody.appendChild(tr);
+          peerBody.appendChild(tr);
+        }
+
+        const evWrap = document.getElementById("events");
+        evWrap.innerHTML = "";
+        for (const e of events.events || []) {
+          const div = document.createElement("div");
+          div.className = "event";
+          div.innerHTML = `<div>${e.message}</div><div class="meta">${e.time} | ${e.level}${e.source_id ? " | " + e.source_id : ""}</div>`;
+          evWrap.appendChild(div);
+        }
       }
 
-      const evWrap = document.getElementById('events');
-      evWrap.innerHTML = '';
-      for (const e of events.events || []) {
-        const div = document.createElement('div');
-        div.className = 'event';
-        div.innerHTML = `<div>${e.message}</div><div class="meta">${e.time} | ${e.level}${e.source_id ? ' | ' + e.source_id : ''}</div>`;
-        evWrap.appendChild(div);
-      }
-    }
-
-    document.getElementById('manual-form').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const prefix = document.getElementById('manual-prefix').value.trim();
-      if (!prefix) return;
-      await api('/api/v1/prefixes', { method: 'POST', body: JSON.stringify({ prefix, enabled: true }) });
-      document.getElementById('manual-prefix').value = '';
-      await refresh();
-    });
-
-    document.getElementById('manual-table').addEventListener('click', async (ev) => {
-      const btn = ev.target.closest('button');
-      if (!btn) return;
-      const act = btn.dataset.act;
-      const prefix = decodeURIComponent(btn.dataset.prefix || '');
-      if (act === 'delete') {
-        await api('/api/v1/prefixes/' + encodeURIComponent(prefix), { method: 'DELETE' });
-      }
-      if (act === 'toggle') {
-        await api('/api/v1/prefixes', { method: 'POST', body: JSON.stringify({ prefix, enabled: btn.dataset.enabled === 'true' }) });
-      }
-      await refresh();
-    });
-
-    document.getElementById('exclude-form').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const prefix = document.getElementById('exclude-prefix').value.trim();
-      const reason = document.getElementById('exclude-reason').value.trim();
-      if (!prefix) return;
-      await api('/api/v1/excludes', { method: 'POST', body: JSON.stringify({ prefix, reason, enabled: true }) });
-      document.getElementById('exclude-prefix').value = '';
-      document.getElementById('exclude-reason').value = '';
-      await refresh();
-    });
-
-    document.getElementById('exclude-table').addEventListener('click', async (ev) => {
-      const btn = ev.target.closest('button');
-      if (!btn) return;
-      const act = btn.dataset.act;
-      const prefix = decodeURIComponent(btn.dataset.prefix || '');
-      if (act === 'delete-exclude') {
-        await api('/api/v1/excludes/' + encodeURIComponent(prefix), { method: 'DELETE' });
-      }
-      if (act === 'toggle-exclude') {
-        await api('/api/v1/excludes', {
-          method: 'POST',
-          body: JSON.stringify({
-            prefix,
-            reason: btn.dataset.reason || '',
-            enabled: btn.dataset.enabled === 'true'
-          })
+      document
+        .getElementById("manual-form")
+        .addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          const prefix = document.getElementById("manual-prefix").value.trim();
+          if (!prefix) return;
+          await api("/api/v1/prefixes", {
+            method: "POST",
+            body: JSON.stringify({ prefix, enabled: true }),
+          });
+          document.getElementById("manual-prefix").value = "";
+          await refresh();
         });
-      }
-      await refresh();
-    });
 
-    document.getElementById('source-form').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const payload = {
-        name: document.getElementById('src-name').value.trim(),
-        url: document.getElementById('src-url').value.trim(),
-        interval_seconds: Number(document.getElementById('src-interval').value || '300'),
-        timeout_seconds: Number(document.getElementById('src-timeout').value || '30'),
-        enabled: true
-      };
-      await api('/api/v1/sources', { method: 'POST', body: JSON.stringify(payload) });
-      document.getElementById('src-name').value = '';
-      document.getElementById('src-url').value = '';
-      await refresh();
-    });
+      document
+        .getElementById("manual-table")
+        .addEventListener("click", async (ev) => {
+          const btn = ev.target.closest("button");
+          if (!btn) return;
+          const act = btn.dataset.act;
+          const prefix = decodeURIComponent(btn.dataset.prefix || "");
+          if (act === "delete") {
+            await api("/api/v1/prefixes/" + encodeURIComponent(prefix), {
+              method: "DELETE",
+            });
+          }
+          if (act === "toggle") {
+            await api("/api/v1/prefixes", {
+              method: "POST",
+              body: JSON.stringify({
+                prefix,
+                enabled: btn.dataset.enabled === "true",
+              }),
+            });
+          }
+          await refresh();
+        });
 
-    document.getElementById('source-table').addEventListener('click', async (ev) => {
-      const btn = ev.target.closest('button');
-      if (!btn) return;
-      const act = btn.dataset.act;
-      const id = btn.dataset.id;
-      if (act === 'sync') {
-        await api(`/api/v1/sources/${id}/sync`, { method: 'POST' });
-      }
-      if (act === 'toggle-src') {
-        await api(`/api/v1/sources/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled: btn.dataset.enabled === 'true' }) });
-      }
-      if (act === 'delete-src') {
-        await api(`/api/v1/sources/${id}`, { method: 'DELETE' });
-      }
-      await refresh();
-    });
+      document
+        .getElementById("exclude-form")
+        .addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          const prefix = document.getElementById("exclude-prefix").value.trim();
+          const reason = document.getElementById("exclude-reason").value.trim();
+          if (!prefix) return;
+          await api("/api/v1/excludes", {
+            method: "POST",
+            body: JSON.stringify({ prefix, reason, enabled: true }),
+          });
+          document.getElementById("exclude-prefix").value = "";
+          document.getElementById("exclude-reason").value = "";
+          await refresh();
+        });
 
-    document.getElementById('exclude-source-form').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const payload = {
-        name: document.getElementById('xsrc-name').value.trim(),
-        url: document.getElementById('xsrc-url').value.trim(),
-        interval_seconds: Number(document.getElementById('xsrc-interval').value || '300'),
-        timeout_seconds: Number(document.getElementById('xsrc-timeout').value || '30'),
-        enabled: true
-      };
-      await api('/api/v1/exclude-sources', { method: 'POST', body: JSON.stringify(payload) });
-      document.getElementById('xsrc-name').value = '';
-      document.getElementById('xsrc-url').value = '';
-      await refresh();
-    });
+      document
+        .getElementById("exclude-table")
+        .addEventListener("click", async (ev) => {
+          const btn = ev.target.closest("button");
+          if (!btn) return;
+          const act = btn.dataset.act;
+          const prefix = decodeURIComponent(btn.dataset.prefix || "");
+          if (act === "delete-exclude") {
+            await api("/api/v1/excludes/" + encodeURIComponent(prefix), {
+              method: "DELETE",
+            });
+          }
+          if (act === "toggle-exclude") {
+            await api("/api/v1/excludes", {
+              method: "POST",
+              body: JSON.stringify({
+                prefix,
+                reason: btn.dataset.reason || "",
+                enabled: btn.dataset.enabled === "true",
+              }),
+            });
+          }
+          await refresh();
+        });
 
-    document.getElementById('exclude-source-table').addEventListener('click', async (ev) => {
-      const btn = ev.target.closest('button');
-      if (!btn) return;
-      const act = btn.dataset.act;
-      const id = btn.dataset.id;
-      if (act === 'sync-xsrc') {
-        await api(`/api/v1/exclude-sources/${id}/sync`, { method: 'POST' });
-      }
-      if (act === 'toggle-xsrc') {
-        await api(`/api/v1/exclude-sources/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled: btn.dataset.enabled === 'true' }) });
-      }
-      if (act === 'delete-xsrc') {
-        await api(`/api/v1/exclude-sources/${id}`, { method: 'DELETE' });
-      }
-      await refresh();
-    });
+      document
+        .getElementById("source-form")
+        .addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          const payload = {
+            name: document.getElementById("src-name").value.trim(),
+            url: document.getElementById("src-url").value.trim(),
+            interval_seconds: Number(
+              document.getElementById("src-interval").value || "300",
+            ),
+            timeout_seconds: Number(
+              document.getElementById("src-timeout").value || "30",
+            ),
+            enabled: true,
+          };
+          await api("/api/v1/sources", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          document.getElementById("src-name").value = "";
+          document.getElementById("src-url").value = "";
+          await refresh();
+        });
 
-    document.getElementById('peer-form').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const payload = {
-        name: document.getElementById('peer-name').value.trim(),
-        neighbor: document.getElementById('peer-neighbor').value.trim(),
-        neighbor_asn: Number(document.getElementById('peer-asn').value || '0'),
-        multihop: Number(document.getElementById('peer-multihop').value || '1'),
-        enabled: true
-      };
-      await api('/api/v1/peers', { method: 'POST', body: JSON.stringify(payload) });
-      document.getElementById('peer-name').value = '';
-      document.getElementById('peer-neighbor').value = '';
-      document.getElementById('peer-asn').value = '';
-      document.getElementById('peer-multihop').value = '1';
-      await refresh();
-    });
+      document
+        .getElementById("source-table")
+        .addEventListener("click", async (ev) => {
+          const btn = ev.target.closest("button");
+          if (!btn) return;
+          const act = btn.dataset.act;
+          const id = btn.dataset.id;
+          if (act === "sync") {
+            await api(`/api/v1/sources/${id}/sync`, { method: "POST" });
+          }
+          if (act === "toggle-src") {
+            await api(`/api/v1/sources/${id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ enabled: btn.dataset.enabled === "true" }),
+            });
+          }
+          if (act === "delete-src") {
+            await api(`/api/v1/sources/${id}`, { method: "DELETE" });
+          }
+          await refresh();
+        });
 
-    document.getElementById('peer-bulk-form').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const raw = document.getElementById('peer-bulk-text').value || '';
-      const lines = raw.split(/\r?\n/).map(v => v.trim()).filter(Boolean);
-      const items = [];
-      for (const line of lines) {
-        const parts = line.split(',').map(v => v.trim());
-        if (parts.length < 3) continue;
-        const asn = Number(parts[2]);
-        if (!parts[0] || !parts[1] || !asn) continue;
-        items.push({ name: parts[0], neighbor: parts[1], neighbor_asn: asn, enabled: true, multihop: 1 });
-      }
-      if (!items.length) {
-        alert('Format bulk tidak valid. Gunakan: name,neighbor_ip,neighbor_asn');
-        return;
-      }
-      await api('/api/v1/peers/bulk', { method: 'POST', body: JSON.stringify({ items }) });
-      document.getElementById('peer-bulk-text').value = '';
-      await refresh();
-    });
+      document
+        .getElementById("exclude-source-form")
+        .addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          const payload = {
+            name: document.getElementById("xsrc-name").value.trim(),
+            url: document.getElementById("xsrc-url").value.trim(),
+            interval_seconds: Number(
+              document.getElementById("xsrc-interval").value || "300",
+            ),
+            timeout_seconds: Number(
+              document.getElementById("xsrc-timeout").value || "30",
+            ),
+            enabled: true,
+          };
+          await api("/api/v1/exclude-sources", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          document.getElementById("xsrc-name").value = "";
+          document.getElementById("xsrc-url").value = "";
+          await refresh();
+        });
 
-    document.getElementById('peer-table').addEventListener('click', async (ev) => {
-      const btn = ev.target.closest('button');
-      if (!btn) return;
-      const act = btn.dataset.act;
-      const id = btn.dataset.id;
-      if (act === 'toggle-peer') {
-        await api(`/api/v1/peers/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled: btn.dataset.enabled === 'true' }) });
-      }
-      if (act === 'delete-peer') {
-        await api(`/api/v1/peers/${id}`, { method: 'DELETE' });
-      }
-      await refresh();
-    });
+      document
+        .getElementById("exclude-source-table")
+        .addEventListener("click", async (ev) => {
+          const btn = ev.target.closest("button");
+          if (!btn) return;
+          const act = btn.dataset.act;
+          const id = btn.dataset.id;
+          if (act === "sync-xsrc") {
+            await api(`/api/v1/exclude-sources/${id}/sync`, { method: "POST" });
+          }
+          if (act === "toggle-xsrc") {
+            await api(`/api/v1/exclude-sources/${id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ enabled: btn.dataset.enabled === "true" }),
+            });
+          }
+          if (act === "delete-xsrc") {
+            await api(`/api/v1/exclude-sources/${id}`, { method: "DELETE" });
+          }
+          await refresh();
+        });
 
-    document.getElementById('logout-btn').addEventListener('click', async () => {
-      await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' });
-      window.location.href = '/login';
-    });
+      document
+        .getElementById("peer-form")
+        .addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          const payload = {
+            name: document.getElementById("peer-name").value.trim(),
+            neighbor: document.getElementById("peer-neighbor").value.trim(),
+            neighbor_asn: Number(
+              document.getElementById("peer-asn").value || "0",
+            ),
+            multihop: Number(
+              document.getElementById("peer-multihop").value || "1",
+            ),
+            enabled: true,
+          };
+          await api("/api/v1/peers", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          document.getElementById("peer-name").value = "";
+          document.getElementById("peer-neighbor").value = "";
+          document.getElementById("peer-asn").value = "";
+          document.getElementById("peer-multihop").value = "255";
+          await refresh();
+        });
 
-    loadSession()
-      .then(ok => ok && refresh().catch(err => alert(err.message)))
-      .catch(err => alert(err.message));
-    setInterval(() => refresh().catch(() => {}), 10000);
-  </script>
-</body>
+      document
+        .getElementById("peer-bulk-form")
+        .addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          const raw = document.getElementById("peer-bulk-text").value || "";
+          const lines = raw
+            .split(/\r?\n/)
+            .map((v) => v.trim())
+            .filter(Boolean);
+          const items = [];
+          for (const line of lines) {
+            const parts = line.split(",").map((v) => v.trim());
+            if (parts.length < 3) continue;
+            const asn = Number(parts[2]);
+            if (!parts[0] || !parts[1] || !asn) continue;
+            items.push({
+              name: parts[0],
+              neighbor: parts[1],
+              neighbor_asn: asn,
+              enabled: true,
+              multihop: 1,
+            });
+          }
+          if (!items.length) {
+            alert(
+              "Format bulk tidak valid. Gunakan: name,neighbor_ip,neighbor_asn",
+            );
+            return;
+          }
+          await api("/api/v1/peers/bulk", {
+            method: "POST",
+            body: JSON.stringify({ items }),
+          });
+          document.getElementById("peer-bulk-text").value = "";
+          await refresh();
+        });
+
+      document
+        .getElementById("peer-table")
+        .addEventListener("click", async (ev) => {
+          const btn = ev.target.closest("button");
+          if (!btn) return;
+          const act = btn.dataset.act;
+          const id = btn.dataset.id;
+          if (act === "toggle-peer") {
+            await api(`/api/v1/peers/${id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ enabled: btn.dataset.enabled === "true" }),
+            });
+          }
+          if (act === "delete-peer") {
+            await api(`/api/v1/peers/${id}`, { method: "DELETE" });
+          }
+          await refresh();
+        });
+
+      document
+        .getElementById("logout-btn")
+        .addEventListener("click", async () => {
+          await fetch("/api/v1/auth/logout", {
+            method: "POST",
+            credentials: "same-origin",
+          });
+          window.location.href = "/login";
+        });
+
+      loadSession()
+        .then((ok) => ok && refresh().catch((err) => alert(err.message)))
+        .catch((err) => alert(err.message));
+      setInterval(() => refresh().catch(() => {}), 10000);
+    </script>
+  </body>
 </html>
