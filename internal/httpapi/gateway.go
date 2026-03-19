@@ -50,7 +50,7 @@ func (g *Gateway) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := g.svc.HandleRegister(req.AgentID, req.Name, req.BirdVersion, req.Version); err != nil {
+	if err := g.svc.HandleRegister(req.AgentID, req.Name, req.Hostname, req.BirdVersion, req.Version); err != nil {
 		if strings.Contains(err.Error(), "already registered") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
