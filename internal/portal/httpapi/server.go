@@ -660,6 +660,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AgentID     string `json:"agent_id"`
 		Name        string `json:"name"`
+		Hostname    string `json:"hostname"`
 		BirdVersion string `json:"bird_version"`
 		Version     string `json:"version"`
 	}
@@ -671,7 +672,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("agent_id is required"))
 		return
 	}
-	if err := s.svc.HandleRegister(req.AgentID, req.Name, req.BirdVersion, req.Version); err != nil {
+	if err := s.svc.HandleRegister(req.AgentID, req.Name, req.Hostname, req.BirdVersion, req.Version); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
