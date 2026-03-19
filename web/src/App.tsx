@@ -1,12 +1,13 @@
-import { BrowserRouter, Routes, Route } from 'react-router'
-import { Sidebar } from './components/layout/Sidebar'
-import Dashboard from './pages/Dashboard'
-import Agents from './pages/Agents'
-import Prefixes from './pages/Prefixes'
-import Sources from './pages/Sources'
-import Excludes from './pages/Excludes'
-import Peers from './pages/Peers'
-import Events from './pages/Events'
+import { BrowserRouter, Routes, Route } from "react-router";
+import { Sidebar } from "./components/layout/Sidebar";
+import Dashboard from "./pages/Dashboard";
+import Agents from "./pages/Agents";
+import Prefixes from "./pages/Prefixes";
+import Sources from "./pages/Sources";
+import Excludes from "./pages/Excludes";
+import Peers from "./pages/Peers";
+import Events from "./pages/Events";
+import Docs from "./pages/Docs";
 
 export default function App() {
   return (
@@ -22,9 +23,10 @@ export default function App() {
             <Route path="/excludes" element={<Excludes />} />
             <Route path="/peers" element={<Peers />} />
             <Route path="/events" element={<Events />} />
+            <Route path="/docs" element={<Docs />} />
           </Routes>
         </main>
       </div>
     </BrowserRouter>
-  )
+  );
 }
