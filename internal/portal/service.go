@@ -175,6 +175,9 @@ func (s *Service) TogglePrefix(id int64, enabled bool) error {
 }
 
 func (s *Service) CreatePeer(peer state.Peer) error {
+	if peer.ID == "" {
+		peer.ID = newResourceID("peer")
+	}
 	if err := s.store.CreatePeer(peer); err != nil {
 		return err
 	}
