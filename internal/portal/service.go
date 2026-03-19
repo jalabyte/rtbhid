@@ -296,7 +296,7 @@ func (s *Service) syncExcludeSource(src state.Source) {
 // Pass-through list methods
 // ---------------------------------------------------------------------------
 
-func (s *Service) ListAgents() []state.Agent         { return s.store.ListAgents() }
+func (s *Service) ListAgents() []state.Agent              { return s.store.ListAgents() }
 func (s *Service) GetAgent(id string) (state.Agent, bool) { return s.store.GetAgent(id) }
 func (s *Service) DeleteAgent(id string) error {
 	if err := s.store.DeleteAgent(id); err != nil {
@@ -306,11 +306,12 @@ func (s *Service) DeleteAgent(id string) error {
 	return nil
 }
 func (s *Service) ListPrefixes() []state.Prefix       { return s.store.ListPrefixes() }
-func (s *Service) ListSources() []state.Source         { return s.store.ListSources() }
-func (s *Service) ListExcludes() []state.Exclude               { return s.store.ListExcludes() }
-func (s *Service) ListExcludeSources() []state.Source           { return s.store.ListExcludeSources() }
-func (s *Service) ListPeers() []state.Peer                     { return s.store.ListPeers() }
-func (s *Service) ListEvents(limit int) []state.Event  { return s.store.ListEvents(limit) }
+func (s *Service) ListSources() []state.Source        { return s.store.ListSources() }
+func (s *Service) ListExcludes() []state.Exclude      { return s.store.ListExcludes() }
+func (s *Service) ListExcludeSources() []state.Source { return s.store.ListExcludeSources() }
+func (s *Service) ListPeers() []state.Peer            { return s.store.ListPeers() }
+func (s *Service) ListEvents(limit int) []state.Event { return s.store.ListEvents(limit) }
+func (s *Service) GetEffectivePrefixCount() int       { return len(s.store.EffectivePrefixes()) }
 
 // ---------------------------------------------------------------------------
 // Source sync

@@ -81,6 +81,11 @@ make agent          # outputs bin/rtbhd
 # Build React web assets only
 make web            # builds web/, copies to cmd/portal/web/dist/
 
+# Build for Linux (cross-compile from macOS/Linux)
+make portal-linux   # outputs bin/rtbh-portal-linux-amd64
+make agent-linux    # outputs bin/rtbhd-linux-amd64
+make all-linux      # builds both portal and agent for Linux
+
 # Regenerate protobuf code
 make proto          # requires buf
 

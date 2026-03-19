@@ -106,11 +106,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"agents":   len(s.svc.ListAgents()),
-		"prefixes": len(s.svc.ListPrefixes()),
-		"sources":  len(s.svc.ListSources()),
-		"excludes": len(s.svc.ListExcludes()),
-		"peers":    len(s.svc.ListPeers()),
+		"agents":             len(s.svc.ListAgents()),
+		"prefixes":           len(s.svc.ListPrefixes()),
+		"sources":            len(s.svc.ListSources()),
+		"excludes":           len(s.svc.ListExcludes()),
+		"peers":              len(s.svc.ListPeers()),
+		"effective_prefixes": s.svc.GetEffectivePrefixCount(),
 	})
 }
 
