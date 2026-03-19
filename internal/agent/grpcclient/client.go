@@ -79,6 +79,7 @@ func (c *Client) Run(ctx context.Context) error {
 	regResp, err := c.portal.Register(ctx, &pb.RegisterRequest{
 		AgentId:     c.cfg.AgentID,
 		Name:        c.cfg.AgentName,
+		Hostname:    c.cfg.Hostname,
 		BirdVersion: c.cfg.BirdVersion,
 		Version:     c.cfg.AgentVersion,
 	})

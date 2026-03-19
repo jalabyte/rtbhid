@@ -485,10 +485,11 @@ func (s *Service) HandleHeartbeat(agentID string, prefixCount, peerCount int, bi
 }
 
 // HandleRegister registers an agent in the store.
-func (s *Service) HandleRegister(agentID, name, birdVersion, version string) error {
+func (s *Service) HandleRegister(agentID, name, hostname, birdVersion, version string) error {
 	return s.store.RegisterAgent(state.Agent{
 		ID:          agentID,
 		Name:        name,
+		Hostname:    hostname,
 		BirdVersion: birdVersion,
 		Status:      "online",
 		LastSeen:    timePtr(time.Now().UTC()),
