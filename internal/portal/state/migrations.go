@@ -74,4 +74,5 @@ var migrations = []string{
 		agent_id    TEXT,
 		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`UPDATE peers SET id = 'peer_' || lower(hex(randomblob(4))) || lower(hex(randomblob(2))) || lower(hex(randomblob(2))) || lower(hex(randomblob(2))) || lower(hex(randomblob(6))) WHERE id IS NULL OR id = ''`,
 }
