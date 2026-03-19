@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,12 +17,14 @@ import (
 
 // Server wraps the portal Service and exposes a REST API for the React dashboard.
 type Server struct {
-	svc *portal.Service
+	svc       *portal.Service
+	webAssets fs.FS
 }
 
-// NewServer creates a new portal API server.
-func NewServer(svc *portal.Service) *Server {
-	return &Server{svc: svc}
+// NewServer creates a new portal API server. webAssets is the embedded React
+// build output (embed.FS). Pass a nil fs.FS to skip SPA serving.
+func NewServer(svc *portal.Service, webAssets fs.FS) *Server {
+	return &Server{svc: svc, webAssets: webAssets}
 }
 
 // Handler returns the full HTTP handler with CORS and logging middleware.
@@ -493,13 +496,26 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleFallback(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("<html><body><h1>Portal API</h1><p>React dashboard will be served here.</p></body></html>"))
+	if s.webAssets == nil {
+		http.NotFound(w, r)
 		return
 	}
-	http.NotFound(w, r)
+	// Try to serve the file from the embedded filesystem
+	f, err := s.webAssets.Open(strings.TrimPrefix(r.URL.Path, "/"))
+	if err == nil {
+		f.Close()
+		http.FileServer(http.FS(s.webAssets)).ServeHTTP(w, r)
+		return
+	}
+	// SPA fallback: serve index.html for any non-API, non-file route
+	data, err := fs.ReadFile(s.webAssets, "index.html")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 // ---------------------------------------------------------------------------

@@ -2,3 +2,5 @@
 rtbhd
 /data/*.json
 /data/*.conf
+/agent
+/portal
