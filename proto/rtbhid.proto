@@ -15,6 +15,7 @@ message RegisterRequest {
     string name = 2;
     string bird_version = 3;
     string version = 4;
+    string hostname = 5;
 }
 
 message RegisterResponse {

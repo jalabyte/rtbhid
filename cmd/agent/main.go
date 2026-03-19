@@ -33,6 +33,7 @@ func main() {
 func runAgent() {
 	portalURL := getEnv("RTBH_PORTAL_URL", "localhost:50051")
 	agentName := getEnv("RTBH_AGENT_NAME", hostname())
+	hostName := hostname()
 	birdVersion := getEnv("RTBH_BIRD_VERSION", "2")
 	birdOutput := getEnv("RTBH_BIRD_OUTPUT", "./data/rtbh_auto.conf")
 	birdPeersOutput := getEnv("RTBH_BIRD_PEERS_OUTPUT", "./data/rtbh_peers_auto.conf")
@@ -45,6 +46,7 @@ func runAgent() {
 	client := grpcclient.New(grpcclient.Config{
 		PortalURL:         portalURL,
 		AgentName:         agentName,
+		Hostname:          hostName,
 		BirdVersion:       birdVersion,
 		AgentVersion:      "2.0.0",
 		BirdOutputPath:    birdOutput,
