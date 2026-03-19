@@ -92,6 +92,10 @@ export interface Status {
 export const api = {
   getStatus: () => fetchJSON<Status>('/status'),
 
+  getMe: () => fetchJSON<{ enabled: boolean; logged_in: boolean; username?: string }>('/auth/me'),
+  login: (data: { username: string; password: string }) => postJSON<{ ok: boolean }>('/auth/login', data),
+  logout: () => postJSON<{ ok: boolean }>('/auth/logout', {}),
+
   getAgents: () => fetchJSON<{ items: Agent[] }>('/agents'),
   deleteAgent: (id: string) => deleteJSON(`/agents/${id}`),
 
@@ -106,7 +110,7 @@ export const api = {
     }),
 
   getSources: () => fetchJSON<{ items: Source[] }>('/sources'),
-  addSource: (data: { id: string; name: string; url: string; interval: number }) =>
+  addSource: (data: { name: string; url: string; interval: number }) =>
     postJSON<Source>('/sources', data),
   deleteSource: (id: string) => deleteJSON(`/sources/${id}`),
   syncSource: (id: string) => fetch(`${BASE}/sources/${id}/sync`, { method: 'POST' }),
@@ -114,6 +118,12 @@ export const api = {
   getExcludes: () => fetchJSON<{ items: Exclude[] }>('/excludes'),
   addExclude: (data: { cidr: string; note: string }) => postJSON<Exclude>('/excludes', data),
   deleteExclude: (id: number) => deleteJSON(`/excludes/${id}`),
+
+  getExcludeSources: () => fetchJSON<{ items: Source[] }>('/exclude-sources'),
+  addExcludeSource: (data: { name: string; url: string; interval: number }) =>
+    postJSON<Source>('/exclude-sources', data),
+  deleteExcludeSource: (id: string) => deleteJSON(`/exclude-sources/${id}`),
+  syncExcludeSource: (id: string) => fetch(`${BASE}/exclude-sources/${id}/sync`, { method: 'POST' }),
 
   getPeers: () => fetchJSON<{ items: Peer[] }>('/peers'),
   addPeer: (data: Omit<Peer, 'id' | 'created_at'>) => postJSON<Peer>('/peers', data),

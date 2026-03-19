@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,21 +16,35 @@ import (
 	"rtbhid/internal/portal/state"
 )
 
+//go:embed login.html
+var loginHTML []byte
+
 // Server wraps the portal Service and exposes a REST API for the React dashboard.
 type Server struct {
 	svc       *portal.Service
+	auth      *authManager
 	webAssets fs.FS
 }
 
 // NewServer creates a new portal API server. webAssets is the embedded React
 // build output (embed.FS). Pass a nil fs.FS to skip SPA serving.
-func NewServer(svc *portal.Service, webAssets fs.FS) *Server {
-	return &Server{svc: svc, webAssets: webAssets}
+func NewServer(svc *portal.Service, webAssets fs.FS, authCfg AuthConfig) (*Server, error) {
+	auth, err := newAuthManager(authCfg)
+	if err != nil {
+		return nil, err
+	}
+	return &Server{svc: svc, webAssets: webAssets, auth: auth}, nil
 }
 
 // Handler returns the full HTTP handler with CORS and logging middleware.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+
+	// Auth routes
+	mux.HandleFunc("/login", s.handleLoginPage)
+	mux.HandleFunc("/api/v1/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("/api/v1/auth/logout", s.handleAuthLogout)
+	mux.HandleFunc("/api/v1/auth/me", s.handleAuthMe)
 
 	// Health and status
 	mux.HandleFunc("/api/v1/health", s.handleHealth)
@@ -51,6 +66,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/excludes", s.handleExcludes)
 	mux.HandleFunc("/api/v1/excludes/", s.handleExcludeByID)
 
+	// Exclude Sources
+	mux.HandleFunc("/api/v1/exclude-sources", s.handleExcludeSources)
+	mux.HandleFunc("/api/v1/exclude-sources/", s.handleExcludeSourceByID)
+
 	// Peers
 	mux.HandleFunc("/api/v1/peers", s.handlePeers)
 	mux.HandleFunc("/api/v1/peers/", s.handlePeerByID)
@@ -66,7 +85,7 @@ func (s *Server) Handler() http.Handler {
 	// Fallback for "/"
 	mux.HandleFunc("/", s.handleFallback)
 
-	return withLogging(withCORS(mux))
+	return withLogging(withCORS(s.auth.requireAuth(mux)))
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +111,88 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"sources":  len(s.svc.ListSources()),
 		"excludes": len(s.svc.ListExcludes()),
 		"peers":    len(s.svc.ListPeers()),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/login" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.auth.cfg.Enabled {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	if _, ok := s.auth.currentUser(r); ok {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(loginHTML)
+}
+
+func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.auth.cfg.Enabled {
+		writeError(w, http.StatusBadRequest, errors.New("auth is disabled"))
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !s.auth.checkCredentials(strings.TrimSpace(req.Username), req.Password) {
+		writeError(w, http.StatusUnauthorized, errors.New("invalid username or password"))
+		return
+	}
+	s.auth.issueSession(w, strings.TrimSpace(req.Username))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if s.auth.cfg.Enabled {
+		s.auth.clearSession(w)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.auth.cfg.Enabled {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enabled":   false,
+			"logged_in": true,
+		})
+		return
+	}
+	username, ok := s.auth.currentUser(r)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":   true,
+		"logged_in": ok,
+		"username":  username,
 	})
 }
 
@@ -316,6 +417,61 @@ func (s *Server) handleExcludeByID(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodDelete:
 		if err := s.svc.DeleteExclude(id); err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Exclude Sources
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleExcludeSources(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"items": s.svc.ListExcludeSources()})
+	case http.MethodPost:
+		var src state.Source
+		if err := decodeJSON(r, &src); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := s.svc.CreateExcludeSource(src); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, src)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleExcludeSourceByID(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/exclude-sources/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	id := parts[0]
+
+	// POST /api/v1/exclude-sources/:id/sync
+	if len(parts) == 2 && parts[1] == "sync" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		s.svc.TriggerExcludeSourceSync(id)
+		writeJSON(w, http.StatusAccepted, map[string]any{"scheduled": true})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.svc.DeleteExcludeSource(id); err != nil {
 			writeError(w, http.StatusNotFound, err)
 			return
 		}

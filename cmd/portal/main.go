@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -28,6 +29,15 @@ func main() {
 	localASN := getEnvInt("RTBH_LOCAL_ASN", 65500)
 	tickSec := getEnvInt("RTBH_SCHEDULER_TICK_SECONDS", 15)
 
+	authCfg := httpapi.AuthConfig{
+		Enabled:       os.Getenv("RTBH_AUTH_USER") != "",
+		Username:      os.Getenv("RTBH_AUTH_USER"),
+		Password:      os.Getenv("RTBH_AUTH_PASS"),
+		SessionSecret: os.Getenv("RTBH_AUTH_SESSION_SECRET"),
+		SessionTTL:    time.Duration(getEnvInt("RTBH_AUTH_SESSION_TTL_HOURS", 24)) * time.Hour,
+		CookieSecure:  os.Getenv("RTBH_AUTH_COOKIE_SECURE") == "true",
+	}
+
 	store, err := state.New(dbPath)
 	if err != nil {
 		log.Fatalf("init state: %v", err)
@@ -51,7 +61,14 @@ func main() {
 	}()
 
 	// HTTP server with embedded React assets
-	httpServer := httpapi.NewServer(svc, webAssets)
+	sub, err := fs.Sub(webAssets, "web/dist")
+	if err != nil {
+		log.Fatalf("sub web assets: %v", err)
+	}
+	httpServer, err := httpapi.NewServer(svc, sub, authCfg)
+	if err != nil {
+		log.Fatalf("init http server: %v", err)
+	}
 	srv := &http.Server{
 		Addr:              listenAddr,
 		Handler:           httpServer.Handler(),

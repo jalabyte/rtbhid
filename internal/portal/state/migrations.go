@@ -52,6 +52,21 @@ var migrations = []string{
 		large_communities  TEXT,
 		created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`CREATE TABLE IF NOT EXISTS exclude_sources (
+		id          TEXT PRIMARY KEY,
+		name        TEXT NOT NULL,
+		url         TEXT NOT NULL,
+		interval    INTEGER DEFAULT 3600,
+		enabled     BOOLEAN DEFAULT 1,
+		last_sync   DATETIME,
+		last_count  INTEGER DEFAULT 0,
+		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE TABLE IF NOT EXISTS exclude_source_prefixes (
+		source_id   TEXT REFERENCES exclude_sources(id) ON DELETE CASCADE,
+		cidr        TEXT NOT NULL,
+		PRIMARY KEY (source_id, cidr)
+	)`,
 	`CREATE TABLE IF NOT EXISTS events (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
 		type        TEXT NOT NULL,

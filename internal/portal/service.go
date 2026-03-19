@@ -241,6 +241,58 @@ func (s *Service) DeleteExclude(id int64) error {
 }
 
 // ---------------------------------------------------------------------------
+// Exclude Source CRUD
+// ---------------------------------------------------------------------------
+
+func (s *Service) CreateExcludeSource(src state.Source) error {
+	if src.ID == "" {
+		src.ID = newResourceID("xsrc")
+	}
+	if err := s.store.CreateExcludeSource(src); err != nil {
+		return err
+	}
+	_ = s.store.AddEvent("exclude_source.create", fmt.Sprintf("created exclude source %s", src.Name), "")
+	return nil
+}
+
+func (s *Service) DeleteExcludeSource(id string) error {
+	if err := s.store.DeleteExcludeSource(id); err != nil {
+		return err
+	}
+	_ = s.store.AddEvent("exclude_source.delete", fmt.Sprintf("deleted exclude source id=%s", id), "")
+	s.PushConfigToAll()
+	return nil
+}
+
+func (s *Service) TriggerExcludeSourceSync(sourceID string) {
+	src, ok := s.store.GetExcludeSource(sourceID)
+	if !ok {
+		return
+	}
+	go s.syncExcludeSource(src)
+}
+
+func (s *Service) syncExcludeSource(src state.Source) {
+	log.Printf("syncing exclude source %s (%s)", src.Name, src.URL)
+	cidrs, err := s.fetcher.Fetch(context.Background(), src.URL, src.Interval)
+	if err != nil {
+		log.Printf("sync error for exclude source %s: %v", src.Name, err)
+		_ = s.store.AddEvent("exclude_source.sync_error", fmt.Sprintf("sync failed for %s: %v", src.Name, err), "")
+		return
+	}
+	if err := s.store.ReplaceExcludeSourcePrefixes(src.ID, cidrs); err != nil {
+		log.Printf("sync replace error for exclude source %s: %v", src.Name, err)
+		return
+	}
+	if err := s.store.SetExcludeSourceSyncResult(src.ID, len(cidrs)); err != nil {
+		log.Printf("sync result update error for exclude source %s: %v", src.Name, err)
+	}
+	_ = s.store.AddEvent("exclude_source.sync", fmt.Sprintf("synced %s: %d excludes", src.Name, len(cidrs)), "")
+	log.Printf("synced exclude source %s: %d excludes", src.Name, len(cidrs))
+	s.PushConfigToAll()
+}
+
+// ---------------------------------------------------------------------------
 // Pass-through list methods
 // ---------------------------------------------------------------------------
 
@@ -255,8 +307,9 @@ func (s *Service) DeleteAgent(id string) error {
 }
 func (s *Service) ListPrefixes() []state.Prefix       { return s.store.ListPrefixes() }
 func (s *Service) ListSources() []state.Source         { return s.store.ListSources() }
-func (s *Service) ListExcludes() []state.Exclude       { return s.store.ListExcludes() }
-func (s *Service) ListPeers() []state.Peer             { return s.store.ListPeers() }
+func (s *Service) ListExcludes() []state.Exclude               { return s.store.ListExcludes() }
+func (s *Service) ListExcludeSources() []state.Source           { return s.store.ListExcludeSources() }
+func (s *Service) ListPeers() []state.Peer                     { return s.store.ListPeers() }
 func (s *Service) ListEvents(limit int) []state.Event  { return s.store.ListEvents(limit) }
 
 // ---------------------------------------------------------------------------
@@ -324,19 +377,26 @@ func (s *Service) syncScheduler(ctx context.Context) {
 
 // syncDueSources syncs all enabled sources whose interval has elapsed since last sync.
 func (s *Service) syncDueSources() {
-	sources := s.store.ListSources()
 	now := time.Now().UTC()
-	for _, src := range sources {
-		if !src.Enabled {
-			continue
-		}
-		if src.Interval <= 0 {
+
+	for _, src := range s.store.ListSources() {
+		if !src.Enabled || src.Interval <= 0 {
 			continue
 		}
 		if src.LastSync != nil && now.Sub(*src.LastSync) < time.Duration(src.Interval)*time.Second {
 			continue
 		}
 		go s.syncSource(src)
+	}
+
+	for _, src := range s.store.ListExcludeSources() {
+		if !src.Enabled || src.Interval <= 0 {
+			continue
+		}
+		if src.LastSync != nil && now.Sub(*src.LastSync) < time.Duration(src.Interval)*time.Second {
+			continue
+		}
+		go s.syncExcludeSource(src)
 	}
 }
 

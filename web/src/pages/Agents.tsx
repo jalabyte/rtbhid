@@ -8,7 +8,7 @@ import { Trash2 } from 'lucide-react'
 export default function Agents() {
   const [agents, setAgents] = useState<Agent[]>([])
 
-  const load = () => api.getAgents().then(r => setAgents(r.items)).catch(console.error)
+  const load = () => api.getAgents().then(r => setAgents(r?.items ?? [])).catch(() => setAgents([]))
 
   useEffect(() => { load() }, [])
 

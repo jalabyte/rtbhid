@@ -7,21 +7,20 @@ import { Trash2, Plus, RefreshCw } from 'lucide-react'
 
 export default function Sources() {
   const [sources, setSources] = useState<Source[]>([])
-  const [form, setForm] = useState({ id: '', name: '', url: '', interval: '300' })
+  const [form, setForm] = useState({ name: '', url: '', interval: '300' })
 
-  const load = () => api.getSources().then(r => setSources(r.items)).catch(console.error)
+  const load = () => api.getSources().then(r => setSources(r?.items ?? [])).catch(() => setSources([]))
 
   useEffect(() => { load() }, [])
 
   const handleAdd = async () => {
-    if (!form.id.trim() || !form.url.trim()) return
+    if (!form.url.trim()) return
     await api.addSource({
-      id: form.id.trim(),
       name: form.name.trim(),
       url: form.url.trim(),
       interval: parseInt(form.interval, 10) || 300,
     })
-    setForm({ id: '', name: '', url: '', interval: '300' })
+    setForm({ name: '', url: '', interval: '300' })
     load()
   }
 
@@ -40,7 +39,6 @@ export default function Sources() {
       <h2 className="text-2xl font-bold">Sources</h2>
 
       <div className="flex gap-2 flex-wrap">
-        <Input placeholder="ID" value={form.id} onChange={e => setForm(f => ({ ...f, id: e.target.value }))} className="max-w-[120px]" />
         <Input placeholder="Name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="max-w-[160px]" />
         <Input placeholder="URL" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} className="max-w-xs" />
         <Input placeholder="Interval (s)" value={form.interval} onChange={e => setForm(f => ({ ...f, interval: e.target.value }))} className="max-w-[120px]" />

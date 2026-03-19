@@ -313,6 +313,89 @@ func (s *Store) DeleteExclude(id int64) error {
 }
 
 // --------------------------------------------------------------------------
+// ExcludeSource CRUD
+// --------------------------------------------------------------------------
+
+func (s *Store) CreateExcludeSource(src Source) error {
+	if src.CreatedAt.IsZero() {
+		src.CreatedAt = time.Now().UTC()
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO exclude_sources (id, name, url, interval, enabled, last_sync, last_count, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		src.ID, src.Name, src.URL, src.Interval, src.Enabled, src.LastSync, src.LastCount, src.CreatedAt,
+	)
+	return err
+}
+
+func (s *Store) ListExcludeSources() []Source {
+	rows, err := s.db.Query(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at FROM exclude_sources ORDER BY name`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var out []Source
+	for rows.Next() {
+		var src Source
+		if err := rows.Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt); err != nil {
+			continue
+		}
+		out = append(out, src)
+	}
+	return out
+}
+
+func (s *Store) GetExcludeSource(id string) (Source, bool) {
+	var src Source
+	err := s.db.QueryRow(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at FROM exclude_sources WHERE id = ?`, id).
+		Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt)
+	if err != nil {
+		return Source{}, false
+	}
+	return src, true
+}
+
+func (s *Store) DeleteExcludeSource(id string) error {
+	_, err := s.db.Exec(`DELETE FROM exclude_sources WHERE id = ?`, id)
+	return err
+}
+
+func (s *Store) ReplaceExcludeSourcePrefixes(sourceID string, cidrs []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM exclude_source_prefixes WHERE source_id = ?`, sourceID); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO exclude_source_prefixes (source_id, cidr) VALUES (?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, cidr := range cidrs {
+		normed, err := normalizeCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if _, err := stmt.Exec(sourceID, normed); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) SetExcludeSourceSyncResult(id string, count int) error {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`UPDATE exclude_sources SET last_sync = ?, last_count = ? WHERE id = ?`, now, count, id)
+	return err
+}
+
+// --------------------------------------------------------------------------
 // Peer CRUD
 // --------------------------------------------------------------------------
 
@@ -440,6 +523,24 @@ func (s *Store) EffectivePrefixes() []string {
 		excludeExact[ex.CIDR] = true
 		if pref, err := netip.ParsePrefix(ex.CIDR); err == nil {
 			excludeParsed = append(excludeParsed, pref.Masked())
+		}
+	}
+
+	// 3b. Add exclude source prefixes to exclusion set
+	rows2, err2 := s.db.Query(`
+		SELECT esp.cidr FROM exclude_source_prefixes esp
+		INNER JOIN exclude_sources es ON es.id = esp.source_id
+		WHERE es.enabled = 1`)
+	if err2 == nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var cidr string
+			if err := rows2.Scan(&cidr); err == nil {
+				excludeExact[cidr] = true
+				if pref, err := netip.ParsePrefix(cidr); err == nil {
+					excludeParsed = append(excludeParsed, pref.Masked())
+				}
+			}
 		}
 	}
 

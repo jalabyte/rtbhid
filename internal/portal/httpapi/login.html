@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Login - RTBH Portal</title>
+  <style>
+    :root {
+      --bg1: #f2efe5;
+      --bg2: #d9efe7;
+      --card: #fffefb;
+      --ink: #1b2421;
+      --muted: #64736c;
+      --line: #d5d1c7;
+      --accent: #0f766e;
+      --danger: #b63838;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 85% 8%, rgba(255, 234, 161, 0.7), transparent 70%),
+        linear-gradient(135deg, var(--bg1), var(--bg2));
+    }
+    .card {
+      width: min(420px, calc(100vw - 28px));
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.09);
+      animation: lift .24s ease;
+    }
+    @keyframes lift {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 25px;
+      letter-spacing: 0.2px;
+    }
+    .sub {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    form {
+      display: grid;
+      gap: 10px;
+    }
+    label {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    input, button {
+      width: 100%;
+      padding: 10px;
+      border-radius: 9px;
+      border: 1px solid var(--line);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    input:focus {
+      border-color: var(--accent);
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+    }
+    button {
+      cursor: pointer;
+      border-color: transparent;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      transition: transform .08s ease;
+    }
+    button:hover { transform: translateY(-1px); }
+    #error {
+      min-height: 19px;
+      color: var(--danger);
+      font-size: 13px;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <section class="card">
+    <h1>RTBH Portal Login</h1>
+    <p class="sub">Sign in to access the dashboard and API.</p>
+
+    <form id="login-form">
+      <label for="username">Username</label>
+      <input id="username" autocomplete="username" required />
+
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+
+      <button type="submit">Sign In</button>
+      <div id="error"></div>
+    </form>
+  </section>
+
+  <script>
+    const form = document.getElementById('login-form');
+    const errBox = document.getElementById('error');
+
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      errBox.textContent = '';
+
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      try {
+        const res = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ username, password })
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(body.error || 'Login failed');
+        }
+        window.location.href = '/';
+      } catch (err) {
+        errBox.textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

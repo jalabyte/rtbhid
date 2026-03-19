@@ -11,7 +11,7 @@ export default function Prefixes() {
   const [cidr, setCidr] = useState('')
   const [note, setNote] = useState('')
 
-  const load = () => api.getPrefixes().then(r => setPrefixes(r.items)).catch(console.error)
+  const load = () => api.getPrefixes().then(r => setPrefixes(r?.items ?? [])).catch(() => setPrefixes([]))
 
   useEffect(() => { load() }, [])
 

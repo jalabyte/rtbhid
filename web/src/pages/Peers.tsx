@@ -12,7 +12,7 @@ export default function Peers() {
     name: '', neighbor_ip: '', remote_as: '', local_as: '', multihop: '0',
   })
 
-  const load = () => api.getPeers().then(r => setPeers(r.items)).catch(console.error)
+  const load = () => api.getPeers().then(r => setPeers(r?.items ?? [])).catch(() => setPeers([]))
 
   useEffect(() => { load() }, [])
 

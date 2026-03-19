@@ -4,3 +4,4 @@ rtbhd
 /data/*.conf
 /agent
 /portal
+/data/*.db

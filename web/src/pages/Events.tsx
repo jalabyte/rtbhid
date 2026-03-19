@@ -7,7 +7,7 @@ export default function Events() {
   const [events, setEvents] = useState<Event[]>([])
 
   useEffect(() => {
-    api.getEvents().then(r => setEvents(r.items)).catch(console.error)
+    api.getEvents().then(r => setEvents(r?.items ?? [])).catch(() => setEvents([]))
   }, [])
 
   return (
