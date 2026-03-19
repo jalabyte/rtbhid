@@ -23,6 +23,7 @@ type Config struct {
 	PortalURL    string
 	AgentID      string
 	AgentName    string
+	Hostname     string
 	BirdVersion  string
 	AgentVersion string
 
