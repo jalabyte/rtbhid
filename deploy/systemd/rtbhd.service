@@ -1,31 +1,16 @@
 [Unit]
-Description=RTBH Central Controller (rtbhd)
-After=network-online.target
-Wants=network-online.target
+Description=RTBH Agent
+After=network.target bird.service
 
 [Service]
 Type=simple
 User=rtbhd
 Group=bird
-# Keep supplementary group for compatibility.
-SupplementaryGroups=bird
-EnvironmentFile=-/etc/default/rtbhd
-WorkingDirectory=/var/lib/rtbhd
+EnvironmentFile=/etc/default/rtbhd
 ExecStart=/usr/local/bin/rtbhd
 Restart=on-failure
-RestartSec=3s
-LimitNOFILE=65536
-UMask=0027
-
-# Hardening
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-ReadWritePaths=/var/lib/rtbhd
+RestartSec=5
+WorkingDirectory=/var/lib/rtbhd
 
 [Install]
 WantedBy=multi-user.target
