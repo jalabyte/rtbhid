@@ -88,6 +88,7 @@ export interface Status {
   excludes: number;
   peers: number;
   effective_prefixes: number;
+  local_asn: number;
 }
 
 export const api = {
@@ -149,6 +150,17 @@ export const api = {
   getPeers: () => fetchJSON<{ items: Peer[] }>("/peers"),
   addPeer: (data: Omit<Peer, "id" | "created_at">) =>
     postJSON<Peer>("/peers", data),
+  bulkAddPeers: (
+    items: Array<{
+      name: string;
+      neighbor_ip: string;
+      remote_as: number;
+      multihop: number;
+      enabled?: boolean;
+      std_communities?: string[];
+      large_communities?: string[];
+    }>,
+  ) => postJSON<{ created: number }>("/peers/bulk", { items }),
   deletePeer: (id: string) => deleteJSON(`/peers/${id}`),
 
   getEvents: (limit = 100) =>

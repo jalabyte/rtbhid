@@ -183,6 +183,44 @@ func (s *Service) CreatePeer(peer state.Peer) error {
 	return nil
 }
 
+type PeerBulkInput struct {
+	Name             string   `json:"name"`
+	NeighborIP       string   `json:"neighbor_ip"`
+	RemoteAS         int      `json:"remote_as"`
+	Multihop         int      `json:"multihop"`
+	Enabled          *bool    `json:"enabled,omitempty"`
+	StdCommunities   []string `json:"std_communities,omitempty"`
+	LargeCommunities []string `json:"large_communities,omitempty"`
+}
+
+func (s *Service) BulkCreatePeers(items []PeerBulkInput) error {
+	for i, item := range items {
+		peer := state.Peer{
+			ID:               newResourceID("peer"),
+			Name:             item.Name,
+			NeighborIP:       item.NeighborIP,
+			RemoteAS:         item.RemoteAS,
+			LocalAS:          0, // Use global ASN
+			Multihop:         item.Multihop,
+			Enabled:          item.Enabled != nil && *item.Enabled || item.Enabled == nil,
+			StdCommunities:   item.StdCommunities,
+			LargeCommunities: item.LargeCommunities,
+		}
+		if peer.Enabled {
+			peer.Enabled = true // Default to true if not specified
+		}
+		if item.Enabled != nil {
+			peer.Enabled = *item.Enabled
+		}
+		if err := s.store.CreatePeer(peer); err != nil {
+			return fmt.Errorf("bulk item %d: %w", i+1, err)
+		}
+	}
+	_ = s.store.AddEvent("peer.bulk_create", fmt.Sprintf("bulk created %d peers", len(items)), "")
+	s.PushConfigToAll()
+	return nil
+}
+
 func (s *Service) UpdatePeer(peer state.Peer) error {
 	if err := s.store.UpdatePeer(peer); err != nil {
 		return err
@@ -338,6 +376,7 @@ func (s *Service) ListExcludeSources() []state.Source { return s.store.ListExclu
 func (s *Service) ListPeers() []state.Peer            { return s.store.ListPeers() }
 func (s *Service) ListEvents(limit int) []state.Event { return s.store.ListEvents(limit) }
 func (s *Service) GetEffectivePrefixCount() int       { return len(s.store.EffectivePrefixes()) }
+func (s *Service) GetLocalASN() int                   { return s.localASN }
 
 // ---------------------------------------------------------------------------
 // Source sync

@@ -72,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Peers
 	mux.HandleFunc("/api/v1/peers", s.handlePeers)
+	mux.HandleFunc("/api/v1/peers/bulk", s.handlePeerBulk)
 	mux.HandleFunc("/api/v1/peers/", s.handlePeerByID)
 
 	// Events
@@ -112,6 +113,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"excludes":           len(s.svc.ListExcludes()),
 		"peers":              len(s.svc.ListPeers()),
 		"effective_prefixes": s.svc.GetEffectivePrefixCount(),
+		"local_asn":          s.svc.GetLocalASN(),
 	})
 }
 
@@ -546,6 +548,31 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func (s *Server) handlePeerBulk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		Items []portal.PeerBulkInput `json:"items"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if len(req.Items) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("no peers provided"))
+		return
+	}
+	if err := s.svc.BulkCreatePeers(req.Items); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"created": len(req.Items),
+	})
 }
 
 func (s *Server) handlePeerByID(w http.ResponseWriter, r *http.Request) {

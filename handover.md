@@ -190,17 +190,19 @@ All under `/api/v1/` (except auth/login). Full list from `server.go`:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
-| GET | `/status` | Agent/source/peer counts |
+| GET | `/status` | Agent/source/peer counts + effective_prefixes |
 | GET/DELETE | `/agents/:id` | List/delete agents |
 | GET/POST | `/prefixes` | List/create prefixes |
 | PUT | `/prefixes/:id/toggle` | Enable/disable prefix |
 | DELETE | `/prefixes/:id` | Delete prefix |
 | GET/POST | `/sources` | List/create prefix sources |
+| PUT | `/sources/:id/toggle` | Enable/disable source |
 | DELETE | `/sources/:id` | Delete source |
 | POST | `/sources/:id/sync` | Force source sync |
 | GET/POST | `/excludes` | List/create excludes |
 | DELETE | `/excludes/:id` | Delete exclude |
 | GET/POST | `/exclude-sources` | List/create exclude sources |
+| PUT | `/exclude-sources/:id/toggle` | Enable/disable exclude source |
 | DELETE | `/exclude-sources/:id` | Delete exclude source |
 | POST | `/exclude-sources/:id/sync` | Force exclude source sync |
 | GET/POST | `/peers` | List/create peers |
@@ -300,6 +302,9 @@ Two service files in `deploy/systemd/`:
 - **Portal auth** — Ported auth system from standalone to portal. Login page, session cookies, auth middleware.
 - **Source ID auto-generation** — Backend generates IDs; frontend removed manual ID input field.
 - **Sidebar logout** — React sidebar checks auth status and shows logout button when auth is enabled.
+- **Effective prefixes stats** — Dashboard now shows effective prefix count (manual + sources - excludes) via `/status` endpoint. Added `GetEffectivePrefixCount()` to service layer.
+- **Linux build targets** — Makefile now includes `portal-linux`, `agent-linux`, and `all-linux` targets for cross-compiling to Linux amd64 from macOS/Linux.
+- **Source enable/disable** — Added toggle functionality for sources and exclude sources. Backend: `PUT /sources/:id/toggle`, `PUT /exclude-sources/:id/toggle`. Frontend: Status badge and Power button to activate/deactivate. Sources are now enabled by default when created.
 
 ---
 
