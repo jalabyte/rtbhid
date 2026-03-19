@@ -51,6 +51,7 @@ func (s *Server) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.Reg
 	err := s.svc.HandleRegister(
 		req.GetAgentId(),
 		req.GetName(),
+		req.GetHostname(),
 		req.GetBirdVersion(),
 		req.GetVersion(),
 	)
