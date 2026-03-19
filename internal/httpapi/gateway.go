@@ -37,6 +37,7 @@ func (g *Gateway) Register(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AgentID     string `json:"agent_id"`
 		Name        string `json:"name"`
+		Hostname    string `json:"hostname"`
 		BirdVersion string `json:"bird_version"`
 		Version     string `json:"version"`
 	}
