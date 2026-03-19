@@ -576,11 +576,35 @@ func (s *Server) handlePeerBulk(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePeerByID(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/v1/peers/")
-	if id == "" {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/peers/")
+	if rest == "" {
 		http.NotFound(w, r)
 		return
 	}
+
+	// Check for /toggle suffix
+	if strings.HasSuffix(rest, "/toggle") {
+		id := strings.TrimSuffix(rest, "/toggle")
+		if r.Method != http.MethodPut {
+			methodNotAllowed(w)
+			return
+		}
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := s.svc.TogglePeer(id, req.Enabled); err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+
+	id := rest
 	switch r.Method {
 	case http.MethodPut:
 		var peer state.Peer

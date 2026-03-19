@@ -161,6 +161,12 @@ export const api = {
       large_communities?: string[];
     }>,
   ) => postJSON<{ created: number }>("/peers/bulk", { items }),
+  togglePeer: (id: string, enabled: boolean) =>
+    fetch(`${BASE}/peers/${id}/toggle`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
   deletePeer: (id: string) => deleteJSON(`/peers/${id}`),
 
   getEvents: (limit = 100) =>

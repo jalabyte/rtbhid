@@ -11,7 +11,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Trash2, Plus, Upload } from "lucide-react";
+import { Trash2, Plus, Upload, Power } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function Peers() {
@@ -88,6 +88,11 @@ export default function Peers() {
 
   const handleDelete = async (id: string) => {
     await api.deletePeer(id);
+    load();
+  };
+
+  const handleToggle = async (id: string, enabled: boolean) => {
+    await api.togglePeer(id, enabled);
     load();
   };
 
@@ -191,7 +196,7 @@ export default function Peers() {
             <TableHead>Remote AS</TableHead>
             <TableHead>Multihop</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead className="w-16"></TableHead>
+            <TableHead className="w-24"></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -206,11 +211,22 @@ export default function Peers() {
                   {p.enabled ? "enabled" : "disabled"}
                 </Badge>
               </TableCell>
-              <TableCell>
+              <TableCell className="flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleToggle(p.id, !p.enabled)}
+                  title={p.enabled ? "Disable" : "Enable"}
+                >
+                  <Power
+                    className={`h-4 w-4 ${p.enabled ? "text-green-600" : "text-gray-400"}`}
+                  />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={() => handleDelete(p.id)}
+                  title="Delete"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>

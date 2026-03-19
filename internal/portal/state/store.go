@@ -462,6 +462,11 @@ func (s *Store) DeletePeer(id string) error {
 	return err
 }
 
+func (s *Store) TogglePeer(id string, enabled bool) error {
+	_, err := s.db.Exec(`UPDATE peers SET enabled = ? WHERE id = ?`, enabled, id)
+	return err
+}
+
 // --------------------------------------------------------------------------
 // Event CRUD
 // --------------------------------------------------------------------------

@@ -239,6 +239,15 @@ func (s *Service) DeletePeer(id string) error {
 	return nil
 }
 
+func (s *Service) TogglePeer(id string, enabled bool) error {
+	if err := s.store.TogglePeer(id, enabled); err != nil {
+		return err
+	}
+	_ = s.store.AddEvent("peer.toggle", fmt.Sprintf("toggled peer id=%s enabled=%v", id, enabled), "")
+	s.PushConfigToAll()
+	return nil
+}
+
 func (s *Service) CreateSource(src state.Source) error {
 	if src.ID == "" {
 		src.ID = newResourceID("src")
