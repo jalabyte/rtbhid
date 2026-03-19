@@ -205,6 +205,10 @@ func (s *Service) CreateSource(src state.Source) error {
 	if src.ID == "" {
 		src.ID = newResourceID("src")
 	}
+	// Set enabled to true by default if not specified
+	if !src.Enabled {
+		src.Enabled = true
+	}
 	if err := s.store.CreateSource(src); err != nil {
 		return err
 	}
@@ -247,6 +251,10 @@ func (s *Service) DeleteExclude(id int64) error {
 func (s *Service) CreateExcludeSource(src state.Source) error {
 	if src.ID == "" {
 		src.ID = newResourceID("xsrc")
+	}
+	// Set enabled to true by default if not specified
+	if !src.Enabled {
+		src.Enabled = true
 	}
 	if err := s.store.CreateExcludeSource(src); err != nil {
 		return err
