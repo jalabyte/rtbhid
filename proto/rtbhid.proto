@@ -1,0 +1,71 @@
+// proto/rtbhid.proto
+syntax = "proto3";
+package rtbhid;
+
+option go_package = "rtbhid/gen/rtbhid";
+
+service Portal {
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+    rpc StreamConfig(ConfigRequest) returns (stream ConfigUpdate);
+}
+
+message RegisterRequest {
+    string agent_id = 1;
+    string name = 2;
+    string bird_version = 3;
+    string version = 4;
+}
+
+message RegisterResponse {
+    bool success = 1;
+    string message = 2;
+    int32 heartbeat_interval = 3;
+}
+
+message HeartbeatRequest {
+    string agent_id = 1;
+    AgentStatus status = 2;
+    int32 prefix_count = 3;
+    int32 peer_count = 4;
+    string bird_status = 5;
+}
+
+message HeartbeatResponse {
+    bool success = 1;
+}
+
+message AgentStatus {
+    bool online = 1;
+    string bird_version = 2;
+    int32 active_prefixes = 3;
+    int32 active_peers = 4;
+}
+
+message ConfigRequest {
+    string agent_id = 1;
+}
+
+message ConfigUpdate {
+    repeated string prefixes = 1;
+    repeated PeerConfig peers = 2;
+    BirdConfig bird = 3;
+    int64 version = 4;
+}
+
+message PeerConfig {
+    string name = 1;
+    string neighbor_ip = 2;
+    uint32 remote_as = 3;
+    uint32 local_as = 4;
+    uint32 multihop = 5;
+    repeated string std_communities = 6;
+    repeated string large_communities = 7;
+}
+
+message BirdConfig {
+    string output_path = 1;
+    string peers_output_path = 2;
+    bool reload_enabled = 3;
+    string reload_command = 4;
+}
