@@ -360,6 +360,27 @@ func (s *Server) handleSourceByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// PUT /api/v1/sources/:id/toggle
+	if len(parts) == 2 && parts[1] == "toggle" {
+		if r.Method != http.MethodPut {
+			methodNotAllowed(w)
+			return
+		}
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := s.svc.ToggleSource(id, req.Enabled); err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+
 	switch r.Method {
 	case http.MethodDelete:
 		if err := s.svc.DeleteSource(id); err != nil {
@@ -458,6 +479,27 @@ func (s *Server) handleExcludeSourceByID(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	id := parts[0]
+
+	// PUT /api/v1/exclude-sources/:id/toggle
+	if len(parts) == 2 && parts[1] == "toggle" {
+		if r.Method != http.MethodPut {
+			methodNotAllowed(w)
+			return
+		}
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := s.svc.ToggleExcludeSource(id, req.Enabled); err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
 
 	// POST /api/v1/exclude-sources/:id/sync
 	if len(parts) == 2 && parts[1] == "sync" {

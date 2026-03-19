@@ -225,6 +225,15 @@ func (s *Service) DeleteSource(id string) error {
 	return nil
 }
 
+func (s *Service) ToggleSource(id string, enabled bool) error {
+	if err := s.store.ToggleSource(id, enabled); err != nil {
+		return err
+	}
+	_ = s.store.AddEvent("source.toggle", fmt.Sprintf("toggled source id=%s enabled=%v", id, enabled), "")
+	s.PushConfigToAll()
+	return nil
+}
+
 func (s *Service) AddExclude(cidr, note string) (state.Exclude, error) {
 	ex, err := s.store.CreateExclude(state.Exclude{CIDR: cidr, Note: note})
 	if err != nil {
@@ -268,6 +277,15 @@ func (s *Service) DeleteExcludeSource(id string) error {
 		return err
 	}
 	_ = s.store.AddEvent("exclude_source.delete", fmt.Sprintf("deleted exclude source id=%s", id), "")
+	s.PushConfigToAll()
+	return nil
+}
+
+func (s *Service) ToggleExcludeSource(id string, enabled bool) error {
+	if err := s.store.ToggleExcludeSource(id, enabled); err != nil {
+		return err
+	}
+	_ = s.store.AddEvent("exclude_source.toggle", fmt.Sprintf("toggled exclude source id=%s enabled=%v", id, enabled), "")
 	s.PushConfigToAll()
 	return nil
 }

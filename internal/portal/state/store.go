@@ -231,6 +231,11 @@ func (s *Store) DeleteSource(id string) error {
 	return err
 }
 
+func (s *Store) ToggleSource(id string, enabled bool) error {
+	_, err := s.db.Exec(`UPDATE sources SET enabled = ? WHERE id = ?`, enabled, id)
+	return err
+}
+
 func (s *Store) ReplaceSourcePrefixes(sourceID string, cidrs []string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -358,6 +363,11 @@ func (s *Store) GetExcludeSource(id string) (Source, bool) {
 
 func (s *Store) DeleteExcludeSource(id string) error {
 	_, err := s.db.Exec(`DELETE FROM exclude_sources WHERE id = ?`, id)
+	return err
+}
+
+func (s *Store) ToggleExcludeSource(id string, enabled bool) error {
+	_, err := s.db.Exec(`UPDATE exclude_sources SET enabled = ? WHERE id = ?`, enabled, id)
 	return err
 }
 

@@ -119,6 +119,12 @@ export const api = {
   addSource: (data: { name: string; url: string; interval: number }) =>
     postJSON<Source>("/sources", data),
   deleteSource: (id: string) => deleteJSON(`/sources/${id}`),
+  toggleSource: (id: string, enabled: boolean) =>
+    fetch(`${BASE}/sources/${id}/toggle`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
   syncSource: (id: string) =>
     fetch(`${BASE}/sources/${id}/sync`, { method: "POST" }),
 
@@ -131,6 +137,12 @@ export const api = {
   addExcludeSource: (data: { name: string; url: string; interval: number }) =>
     postJSON<Source>("/exclude-sources", data),
   deleteExcludeSource: (id: string) => deleteJSON(`/exclude-sources/${id}`),
+  toggleExcludeSource: (id: string, enabled: boolean) =>
+    fetch(`${BASE}/exclude-sources/${id}/toggle`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
   syncExcludeSource: (id: string) =>
     fetch(`${BASE}/exclude-sources/${id}/sync`, { method: "POST" }),
 
