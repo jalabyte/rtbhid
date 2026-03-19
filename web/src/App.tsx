@@ -1,15 +1,30 @@
-import { Button } from '@/components/ui/button'
+import { BrowserRouter, Routes, Route } from 'react-router'
+import { Sidebar } from './components/layout/Sidebar'
+import Dashboard from './pages/Dashboard'
+import Agents from './pages/Agents'
+import Prefixes from './pages/Prefixes'
+import Sources from './pages/Sources'
+import Excludes from './pages/Excludes'
+import Peers from './pages/Peers'
+import Events from './pages/Events'
 
-function App() {
+export default function App() {
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="text-center space-y-4">
-        <h1 className="text-4xl font-bold">RTBH Portal</h1>
-        <p className="text-muted-foreground">Multi-Bird RTBH Management Portal</p>
-        <Button>Get Started</Button>
+    <BrowserRouter>
+      <div className="flex h-screen">
+        <Sidebar />
+        <main className="flex-1 overflow-auto p-6">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/agents" element={<Agents />} />
+            <Route path="/prefixes" element={<Prefixes />} />
+            <Route path="/sources" element={<Sources />} />
+            <Route path="/excludes" element={<Excludes />} />
+            <Route path="/peers" element={<Peers />} />
+            <Route path="/events" element={<Events />} />
+          </Routes>
+        </main>
       </div>
-    </div>
+    </BrowserRouter>
   )
 }
-
-export default App
