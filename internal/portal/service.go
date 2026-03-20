@@ -125,6 +125,7 @@ func (s *Service) buildConfigUpdate() *pb.ConfigUpdate {
 			continue
 		}
 		peers = append(peers, &pb.PeerConfig{
+			Id:               p.ID,
 			Name:             p.Name,
 			NeighborIp:       p.NeighborIP,
 			RemoteAs:         uint32(p.RemoteAS),

@@ -55,6 +55,7 @@ message ConfigUpdate {
 }
 
 message PeerConfig {
+    string id = 8;
     string name = 1;
     string neighbor_ip = 2;
     uint32 remote_as = 3;

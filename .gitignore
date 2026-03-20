@@ -5,3 +5,4 @@ rtbhd
 /agent
 /portal
 /data/*.db
+.DS_Store

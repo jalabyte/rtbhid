@@ -24,6 +24,7 @@ agent-linux:
 
 proto:
 	buf generate proto
+	mv gen/*.go gen/rtbhid/
 
 clean:
 	rm -rf bin/

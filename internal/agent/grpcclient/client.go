@@ -178,7 +178,7 @@ func (c *Client) applyConfig(update *pb.ConfigUpdate) {
 	peers := make([]bird.Peer, 0, len(update.Peers))
 	for _, p := range update.Peers {
 		peers = append(peers, bird.Peer{
-			ID:          p.Name,
+			ID:          p.Id,
 			Name:        p.Name,
 			Neighbor:    p.NeighborIp,
 			NeighborASN: int(p.RemoteAs),

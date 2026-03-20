@@ -461,6 +461,7 @@ func (x *ConfigUpdate) GetVersion() int64 {
 
 type PeerConfig struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               string                 `protobuf:"bytes,8,opt,name=id,proto3" json:"id,omitempty"`
 	Name             string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	NeighborIp       string                 `protobuf:"bytes,2,opt,name=neighbor_ip,json=neighborIp,proto3" json:"neighbor_ip,omitempty"`
 	RemoteAs         uint32                 `protobuf:"varint,3,opt,name=remote_as,json=remoteAs,proto3" json:"remote_as,omitempty"`
@@ -500,6 +501,13 @@ func (x *PeerConfig) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PeerConfig.ProtoReflect.Descriptor instead.
 func (*PeerConfig) Descriptor() ([]byte, []int) {
 	return file_rtbhid_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *PeerConfig) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
 }
 
 func (x *PeerConfig) GetName() string {
@@ -655,9 +663,10 @@ const file_rtbhid_proto_rawDesc = "" +
 	"\bprefixes\x18\x01 \x03(\tR\bprefixes\x12(\n" +
 	"\x05peers\x18\x02 \x03(\v2\x12.rtbhid.PeerConfigR\x05peers\x12&\n" +
 	"\x04bird\x18\x03 \x01(\v2\x12.rtbhid.BirdConfigR\x04bird\x12\x18\n" +
-	"\aversion\x18\x04 \x01(\x03R\aversion\"\xeb\x01\n" +
+	"\aversion\x18\x04 \x01(\x03R\aversion\"\xfb\x01\n" +
 	"\n" +
-	"PeerConfig\x12\x12\n" +
+	"PeerConfig\x12\x0e\n" +
+	"\x02id\x18\b \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
 	"\vneighbor_ip\x18\x02 \x01(\tR\n" +
 	"neighborIp\x12\x1b\n" +
