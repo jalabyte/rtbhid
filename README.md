@@ -1,177 +1,501 @@
-# RTBHID - Centralized RTBH Controller
+# RTBHID - Remotely Triggered Black Hole Controller
 
-`rtbhd` adalah controller RTBH terpusat berbasis Go (single binary) untuk:
+RTBHID adalah sistem kontrol RTBH (Remotely Triggered Black Hole) terpusat untuk mitigasi DDoS. Sistem ini mengelola instance BIRD Internet Routing Daemon (v2/v3) dengan mengontrol prefix IP yang di-blackhole dan BGP peers yang menerima route.
 
-- Manajemen prefix manual (add/delete/enable/disable) untuk blackhole.
-- Sinkronisasi prefix dari banyak remote URL.
-- Sinkronisasi exclude list dari remote URL (terpisah dari blocklist source).
-- Manajemen BGP peer RTBH terpusat (single/bulk) tanpa edit manual `bird.conf` per peer.
-- Exclude list untuk menahan false-positive dari list provider (mis. IP internal/DNS/CDN).
-- Pengaturan interval auto-sync berbeda per source.
-- Aktivasi/deaktivasi source tanpa menghapus konfigurasi source.
-- Export konfigurasi Bird 2/3 secara otomatis.
-- Dashboard web built-in untuk monitoring status, source, dan event.
+## Arsitektur
 
-## Arsitektur Singkat
+RTBHID memiliki tiga mode operasi:
 
-- **Single binary**: API + scheduler + dashboard.
-- **State**: JSON file lokal (`RTBH_STATE_PATH`).
-- **BGP/RTBH plane**: Bird 2/3 tetap menjadi route daemon. `rtbhd` generate include file route blackhole + BGP peers, lalu opsional menjalankan `birdc configure`.
+| Mode | Binary | Storage | Deskripsi |
+|------|--------|---------|-----------|
+| **Portal** | `rtbh-portal` | SQLite (`portal.db`) | Dashboard terpusat yang mengelola banyak agent via gRPC |
+| **Agent** | `rtbhd` (dengan `RTBH_MODE=agent`) | None | Terhubung ke portal via gRPC, menerapkan config ke BIRD lokal |
+| **Standalone** | `rtbhd` (default) | JSON file (`state.json`) | Mode legacy untuk single BIRD instance |
 
-## Menjalankan
-
-```bash
-go run ./cmd/rtbhd
+```
+┌─────────────────┐
+│   rtbh-portal   │  Portal (Dashboard + gRPC Server)
+│   (SQLite DB)   │
+└────────┬────────┘
+         │ gRPC
+    ┌────┴────┬─────────┐
+    │         │         │
+┌───▼───┐ ┌───▼───┐ ┌───▼───┐
+│Agent 1│ │Agent 2│ │Agent N│  Agents (BIRD Config)
+│ BIRD  │ │ BIRD  │ │ BIRD  │
+└───────┘ └───────┘ └───────┘
 ```
 
-Default:
+## Fitur Utama
 
-- Dashboard/API: `http://127.0.0.1:8080`
-- State file: `./data/state.json`
-- Bird route include output: `./data/rtbh_auto.conf`
-- Bird peer include output: `./data/rtbh_peers_auto.conf`
+- ✅ Manajemen prefix manual (add/delete/enable/disable)
+- ✅ Sinkronisasi prefix dari remote URL (multiple sources)
+- ✅ Exclude list untuk false-positive prevention
+- ✅ Manajemen BGP peer terpusat (single/bulk)
+- ✅ Auto-detect BIRD version (2.x/3.x)
+- ✅ Dashboard web modern (React + Tailwind CSS)
+- ✅ REST API lengkap
+- ✅ gRPC untuk komunikasi portal-agent
+- ✅ Authentication dengan session cookie
+- ✅ Dokumentasi publik untuk integrasi upstream
+- ✅ Linux build targets untuk deployment
 
-## Deploy Dengan systemd
+---
 
-File deployment systemd tersedia di:
+## Quick Start
 
-- `deploy/systemd/rtbhd.service`
-- `deploy/systemd/rtbhd.env.example`
-- `deploy/systemd/README.md`
-- `scripts/install-systemd.sh`
+### Prerequisites
 
-Quick start:
+- Go 1.21+
+- Node.js 18+ dan npm (untuk build frontend)
+- BIRD 2.x atau 3.x (untuk agent)
 
-```bash
-go build -o rtbhd ./cmd/rtbhd
-sudo ./scripts/install-systemd.sh ./rtbhd
-```
-
-Lalu edit `/etc/default/rtbhd` sesuai environment produksi Anda.
-
-## Environment Variables
-
-- `RTBH_LISTEN_ADDR` (default `:8080`)
-- `RTBH_STATE_PATH` (default `./data/state.json`)
-- `RTBH_BIRD_OUTPUT` (default `./data/rtbh_auto.conf`)
-- `RTBH_BIRD_PEERS_OUTPUT` (default `./data/rtbh_peers_auto.conf`)
-- `RTBH_BIRD_RELOAD` (default `false`)
-- `RTBH_BIRD_COMMAND` (default `birdc configure`)
-- `RTBH_LOCAL_ASN` (default `65500`)
-- `RTBH_EXPORT_STD_COMMUNITIES` (contoh `65535:666`)
-- `RTBH_EXPORT_LARGE_COMMUNITIES` (contoh `65500:666:1,65500:666:2`)
-- `RTBH_SYNC_USER_AGENT` (default `rtbhd/1.0`)
-- `RTBH_SCHEDULER_TICK_SECONDS` (default `15`)
-- `RTBH_AUTH_USER` (default empty, auth disabled)
-- `RTBH_AUTH_PASS` (default empty, auth disabled)
-- `RTBH_AUTH_SESSION_SECRET` (default empty, random at startup)
-- `RTBH_AUTH_SESSION_TTL_HOURS` (default `24`)
-- `RTBH_AUTH_COOKIE_SECURE` (default `false`)
-
-Contoh enable auto-reload Bird:
+### Build Portal
 
 ```bash
-export RTBH_BIRD_RELOAD=true
-export RTBH_BIRD_COMMAND='birdc -s /run/bird/bird.ctl configure'
-go run ./cmd/rtbhd
+# Clone repository
+git clone https://github.com/your-org/rtbhid.git
+cd rtbhid
+
+# Build portal (frontend + backend)
+make portal
+
+# Output: bin/rtbh-portal
 ```
 
-## Integrasi Bird 2/3
+### Build Agent
 
-Tambahkan include pada konfigurasi utama Bird:
+```bash
+# Build agent
+make agent
+
+# Output: bin/rtbhd
+```
+
+### Build untuk Linux
+
+```bash
+# Build portal untuk Linux amd64
+make portal-linux
+# Output: bin/rtbh-portal-linux-amd64
+
+# Build agent untuk Linux amd64
+make agent-linux
+# Output: bin/rtbhd-linux-amd64
+
+# Build keduanya sekaligus
+make all-linux
+```
+
+---
+
+## Deployment
+
+### Portal Deployment
+
+Portal adalah dashboard terpusat yang mengelola semua agent.
+
+#### 1. Environment Variables
+
+Buat file `/etc/default/rtbh-portal`:
+
+```bash
+# Network
+RTBH_LISTEN_ADDR=:8088
+RTBH_GRPC_ADDR=:50051
+
+# Database
+RTBH_DB_PATH=/var/lib/rtbh-portal/portal.db
+
+# Local ASN (digunakan semua agent)
+RTBH_LOCAL_ASN=65500
+
+# Scheduler
+RTBH_SCHEDULER_TICK_SECONDS=15
+
+# Authentication (opsional)
+RTBH_AUTH_USER=admin
+RTBH_AUTH_PASS=your-secure-password
+RTBH_AUTH_SESSION_SECRET=your-session-secret-key
+RTBH_AUTH_SESSION_TTL_HOURS=24
+RTBH_AUTH_COOKIE_SECURE=false
+```
+
+#### 2. Systemd Service
+
+```bash
+# Copy binary
+sudo cp bin/rtbh-portal /usr/local/bin/
+
+# Create user dan directory
+sudo useradd -r -s /bin/false rtbhd
+sudo mkdir -p /var/lib/rtbh-portal
+sudo chown rtbhd:rtbhd /var/lib/rtbh-portal
+
+# Install systemd service
+sudo cp deploy/systemd/rtbh-portal.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable rtbh-portal
+sudo systemctl start rtbh-portal
+```
+
+#### 3. Akses Dashboard
+
+Buka browser: `http://your-server:8088`
+
+Login dengan username/password yang dikonfigurasi (jika auth enabled).
+
+---
+
+### Agent Deployment
+
+Agent berjalan di setiap router BIRD dan terhubung ke portal.
+
+#### 1. Environment Variables
+
+Buat file `/etc/default/rtbhd`:
+
+```bash
+# Mode
+RTBH_MODE=agent
+
+# Portal connection
+RTBH_PORTAL_URL=portal.example.com:50051
+
+# Agent identity
+RTBH_AGENT_NAME=router-01
+
+# BIRD configuration
+RTBH_BIRD_VERSION=3
+RTBH_BIRD_OUTPUT=/etc/bird/rtbh_auto.conf
+RTBH_BIRD_PEERS_OUTPUT=/etc/bird/rtbh_peers_auto.conf
+RTBH_BIRD_RELOAD=true
+RTBH_BIRD_COMMAND=birdc -s /var/run/bird/bird.ctl configure
+RTBH_BIRD_CONF_DIR=/etc/bird
+
+# Local ASN (opsional, default dari portal)
+RTBH_LOCAL_ASN=65500
+
+# Export communities
+RTBH_EXPORT_STD_COMMUNITIES=65535:666
+RTBH_EXPORT_LARGE_COMMUNITIES=65535:666:666
+```
+
+#### 2. Systemd Service
+
+```bash
+# Copy binary
+sudo cp bin/rtbhd /usr/local/bin/
+
+# Create user dan group
+sudo useradd -r -s /bin/false -G bird rtbhd
+
+# Create directory
+sudo mkdir -p /var/lib/rtbhd
+sudo chown rtbhd:bird /var/lib/rtbhd
+
+# Install systemd service
+sudo cp deploy/systemd/rtbhd.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable rtbhd
+sudo systemctl start rtbhd
+```
+
+#### 3. BIRD Configuration
+
+Tambahkan include di `/etc/bird/bird.conf`:
 
 ```bird
-include "/absolute/path/to/data/rtbh_auto.conf";
-include "/absolute/path/to/data/rtbh_peers_auto.conf";
+# RTBH routes
+include "/etc/bird/rtbh_auto.conf";
+
+# RTBH peers
+include "/etc/bird/rtbh_peers_auto.conf";
 ```
 
-Lalu pastikan ada sesi BGP untuk announce komunitas RTBH sesuai policy jaringan Anda.
+#### 4. Auto-detect BIRD Version
 
-Lihat contoh minimal: [examples/bird.conf.snippet](examples/bird.conf.snippet)
+Agent akan otomatis mendeteksi versi BIRD dengan menjalankan:
+```bash
+birdc -s /var/run/bird/bird.ctl show status
+```
 
-## Login Dashboard/API
+Jika berhasil, agent akan melaporkan versi lengkap (mis. "3.2.0").
 
-`rtbhd` mendukung halaman login built-in pada `/login` (session cookie).
+Fallback: Jika deteksi gagal, gunakan `RTBH_BIRD_VERSION` environment variable.
 
-Aktifkan dengan set environment:
+---
+
+### Standalone Deployment (Legacy)
+
+Untuk single BIRD instance tanpa portal:
 
 ```bash
-export RTBH_AUTH_USER=admin
-export RTBH_AUTH_PASS='ganti-password-kuat'
+# Mode standalone (default)
+RTBH_LISTEN_ADDR=:8080 \
+RTBH_STATE_PATH=/var/lib/rtbhd/state.json \
+RTBH_BIRD_OUTPUT=/etc/bird/rtbh_auto.conf \
+RTBH_BIRD_RELOAD=true \
+RTBH_BIRD_COMMAND='birdc -s /var/run/bird/bird.ctl configure' \
+./bin/rtbhd
 ```
 
-Opsional:
+---
 
-- `RTBH_AUTH_SESSION_SECRET` untuk secret statik lintas restart.
-- `RTBH_AUTH_COOKIE_SECURE=true` jika service diakses via HTTPS.
+## Environment Variables Reference
 
-## Export Community Tag
+### Portal Variables
 
-Untuk menambahkan community tag otomatis ke semua route RTBH yang diexport ke peers:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RTBH_LISTEN_ADDR` | `:8088` | HTTP listen address |
+| `RTBH_GRPC_ADDR` | `:50051` | gRPC listen address |
+| `RTBH_DB_PATH` | `./data/portal.db` | SQLite database path |
+| `RTBH_LOCAL_ASN` | `65500` | Local ASN untuk semua agent |
+| `RTBH_SCHEDULER_TICK_SECONDS` | `15` | Interval sync check |
+| `RTBH_AUTH_USER` | *(disabled)* | Auth username |
+| `RTBH_AUTH_PASS` | *(disabled)* | Auth password |
+| `RTBH_AUTH_SESSION_SECRET` | *(random)* | Session signing key |
+| `RTBH_AUTH_SESSION_TTL_HOURS` | `24` | Session TTL |
+| `RTBH_AUTH_COOKIE_SECURE` | `false` | Set Secure flag |
+
+### Agent Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RTBH_MODE` | `standalone` | `agent` atau `standalone` |
+| `RTBH_PORTAL_URL` | `localhost:50051` | Portal gRPC address |
+| `RTBH_AGENT_NAME` | *(hostname)* | Agent display name |
+| `RTBH_BIRD_VERSION` | *(auto-detect)* | BIRD version (2/3) |
+| `RTBH_BIRD_OUTPUT` | `./data/rtbh_auto.conf` | Routes output file |
+| `RTBH_BIRD_PEERS_OUTPUT` | `./data/rtbh_peers_auto.conf` | Peers output file |
+| `RTBH_BIRD_RELOAD` | `false` | Auto-reload BIRD |
+| `RTBH_BIRD_COMMAND` | `birdc configure` | BIRD reload command |
+| `RTBH_BIRD_CONF_DIR` | *(none)* | BIRD config directory |
+| `RTBH_LOCAL_ASN` | `65500` | Local ASN (jika berbeda dari portal) |
+| `RTBH_EXPORT_STD_COMMUNITIES` | *(none)* | Standard BGP communities |
+| `RTBH_EXPORT_LARGE_COMMUNITIES` | *(none)* | Large BGP communities |
+
+---
+
+## REST API Reference
+
+Portal menyediakan REST API di `/api/v1/`.
+
+### Authentication
+
+```http
+POST /api/v1/auth/login
+Content-Type: application/json
+
+{"username": "admin", "password": "password"}
+```
+
+### Status
+
+```http
+GET /api/v1/status
+```
+
+Response:
+```json
+{
+  "agents": 3,
+  "prefixes": 150,
+  "sources": 5,
+  "excludes": 10,
+  "peers": 8,
+  "effective_prefixes": 140,
+  "local_asn": 65500
+}
+```
+
+### Prefixes
+
+```http
+GET    /api/v1/prefixes
+POST   /api/v1/prefixes
+PUT    /api/v1/prefixes/:id/toggle
+DELETE /api/v1/prefixes/:id
+```
+
+### Sources
+
+```http
+GET    /api/v1/sources
+POST   /api/v1/sources
+PUT    /api/v1/sources/:id/toggle
+DELETE /api/v1/sources/:id
+POST   /api/v1/sources/:id/sync
+```
+
+### Excludes
+
+```http
+GET    /api/v1/excludes
+POST   /api/v1/excludes
+DELETE /api/v1/excludes/:id
+GET    /api/v1/exclude-sources
+POST   /api/v1/exclude-sources
+PUT    /api/v1/exclude-sources/:id/toggle
+DELETE /api/v1/exclude-sources/:id
+POST   /api/v1/exclude-sources/:id/sync
+```
+
+### Peers
+
+```http
+GET    /api/v1/peers
+POST   /api/v1/peers
+POST   /api/v1/peers/bulk
+PUT    /api/v1/peers/:id/toggle
+DELETE /api/v1/peers/:id
+```
+
+### Events
+
+```http
+GET /api/v1/events?limit=100
+```
+
+---
+
+## Development
+
+### Setup Development Environment
 
 ```bash
-export RTBH_EXPORT_STD_COMMUNITIES='65535:666'
-export RTBH_EXPORT_LARGE_COMMUNITIES='65500:666:1,65500:666:2'
+# Backend
+go mod download
+
+# Frontend
+cd web
+npm install
 ```
 
-Keduanya opsional dan bisa dipakai bersamaan.
+### Run Development Server
 
-## API Ringkas
+```bash
+# Terminal 1: Portal backend
+make portal
+./bin/rtbh-portal
 
-- `GET /api/v1/health`
-- `POST /api/v1/auth/login` body `{ "username": "...", "password": "..." }`
-- `POST /api/v1/auth/logout`
-- `GET /api/v1/auth/me`
-- `GET /api/v1/status`
-- `GET /api/v1/events?limit=120`
-- `GET /api/v1/prefixes`
-- `POST /api/v1/prefixes` body `{ "prefix": "203.0.113.1", "enabled": true }`
-- `DELETE /api/v1/prefixes/{prefix}`
-- `GET /api/v1/excludes`
-- `POST /api/v1/excludes` body `{ "prefix": "203.0.113.1", "reason": "false-positive", "enabled": true }`
-- `DELETE /api/v1/excludes/{prefix}`
-- `GET /api/v1/sources`
-- `POST /api/v1/sources`
-- `PATCH /api/v1/sources/{id}`
-- `POST /api/v1/sources/{id}/sync`
-- `DELETE /api/v1/sources/{id}`
-- `GET /api/v1/exclude-sources`
-- `POST /api/v1/exclude-sources`
-- `PATCH /api/v1/exclude-sources/{id}`
-- `POST /api/v1/exclude-sources/{id}/sync`
-- `DELETE /api/v1/exclude-sources/{id}`
-- `GET /api/v1/peers`
-- `POST /api/v1/peers`
-- `POST /api/v1/peers/bulk` body `{ "items": [...] }`
-- `PATCH /api/v1/peers/{id}`
-- `DELETE /api/v1/peers/{id}`
-
-## Format Remote List
-
-List remote dapat berupa teks sederhana, satu prefix/IP per baris, atau dipisah spasi/koma.
-
-Contoh:
-
-```text
-# komentar
-203.0.113.5
-203.0.113.0/24
-2001:db8::/32
+# Terminal 2: Frontend dev server (hot reload)
+cd web
+npm run dev
 ```
 
-IP tunggal otomatis dinormalisasi menjadi `/32` (IPv4) atau `/128` (IPv6).
+Frontend dev server berjalan di `http://localhost:5173` dengan proxy ke backend di `:8088`.
 
-## Exclude List Behavior
+### Regenerate Protobuf
 
-- Prefix yang ada di exclude list akan dibuang dari hasil sinkronisasi source provider.
-- Prefix dari `exclude-sources` (remote exclude) juga akan dibuang dari hasil sinkronisasi source provider.
-- Exclude bersifat CIDR-aware: jika exclude `1.1.1.0/24`, maka route seperti `1.1.1.1/32` ikut dibuang.
-- Manual prefix tetap bisa Anda gunakan untuk override darurat meskipun prefix itu ada di exclude list.
+```bash
+# Requires buf (https://buf.build)
+make proto
+```
 
-## Catatan Produksi
+---
 
-- Jalankan `rtbhd` sebagai service (systemd/supervisor/container).
-- Disarankan tetap gunakan reverse proxy (TLS, allow-list, rate limit) di depan dashboard/API.
-- Pastikan file output Bird berada di path yang bisa di-include Bird.
-- Aktifkan `RTBH_BIRD_RELOAD=true` hanya jika `birdc` tersedia di host.
-- Jika Bird error `Permission denied` saat include file, pastikan `/var/lib/rtbhd` bisa diakses user/group `bird` (lihat `deploy/systemd/README.md`).
+## Documentation
+
+Portal menyediakan halaman dokumentasi publik di `/docs` yang berisi:
+
+- Konfigurasi untuk upstream providers
+- Contoh konfigurasi BGP untuk berbagai platform:
+  - BIRD 2/3
+  - Juniper Junos
+  - Cisco IOS/IOS-XE
+  - Arista EOS
+  - Huawei VRP
+  - MikroTik RouterOS
+- BGP communities untuk RTBH
+- Security considerations
+
+Akses: `http://your-portal:8088/docs`
+
+---
+
+## Security Considerations
+
+### Portal
+
+1. **Enable Authentication**: Set `RTBH_AUTH_USER` dan `RTBH_AUTH_PASS`
+2. **Use Strong Password**: Minimal 16 karakter
+3. **Session Security**: Set `RTBH_AUTH_SESSION_SECRET` dengan nilai random yang panjang
+4. **HTTPS**: Gunakan reverse proxy dengan TLS
+5. **Firewall**: Batasi akses ke port 8088 dan 50051
+
+### Agent
+
+1. **TLS**: Gunakan TLS untuk koneksi gRPC (jika diperlukan)
+2. **Firewall**: Batasi akses ke port portal
+3. **BIRD Socket Permission**: User `rtbhd` harus punya akses ke BIRD control socket
+4. **File Permissions**: Pastikan file output BIRD bisa di-read oleh user `bird`
+
+---
+
+## Troubleshooting
+
+### Agent tidak bisa connect ke portal
+
+```
+Error: connection refused
+```
+
+**Solusi:**
+1. Cek `RTBH_PORTAL_URL` sudah benar
+2. Cek firewall membuka port gRPC (default 50051)
+3. Cek portal sedang berjalan: `systemctl status rtbh-portal`
+
+### Agent tidak bisa menjalankan birdc
+
+```
+Error: permission denied
+```
+
+**Solusi:**
+1. Tambahkan user `rtbhd` ke group `bird`:
+   ```bash
+   sudo usermod -a -G bird rtbhd
+   ```
+2. Restart agent service
+
+### BIRD version tidak terdeteksi
+
+```
+birdc detection failed, using env fallback
+```
+
+**Solusi:**
+1. Cek `RTBH_BIRD_COMMAND` sudah benar dengan socket path
+2. Cek user `rtbhd` bisa menjalankan `birdc`:
+   ```bash
+   sudo -u rtbhd birdc -s /var/run/bird/bird.ctl show status
+   ```
+3. Set manual: `RTBH_BIRD_VERSION=3.2.0`
+
+### Prefix tidak muncul di BIRD
+
+**Solusi:**
+1. Cek file output sudah di-include di `bird.conf`
+2. Cek BIRD sudah reload:
+   ```bash
+   birdc configure
+   ```
+3. Cek logs agent: `journalctl -u rtbhd -f`
+
+---
+
+## Support
+
+- **Documentation**: `/docs` page on your portal
+- **Issues**: GitHub Issues
+- **Email**: support@jalabyte.com
+
+---
+
+## License
+
+Copyright © 2026 PT Jala Informatika Nusantara
+
+Coded by [PT Jala Informatika Nusantara](https://jalabyte.com) • Idea from: Rifqi Arief Pamungkas (Rapdodge)
