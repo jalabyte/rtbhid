@@ -179,7 +179,6 @@ func getEnvBool(key string, fallback bool) bool {
 func detectBirdVersion(birdCommand, envFallback string) string {
 	// Parse birdCommand to extract birdc binary and socket path
 	// Example: "birdc -s /var/run/bird/bird.ctl configure"
-	log.Printf("detectBirdVersion: parsing birdCommand='%s', envFallback='%s'", birdCommand, envFallback)
 	args := strings.Fields(birdCommand)
 	if len(args) == 0 {
 		args = []string{"birdc"}
@@ -187,7 +186,6 @@ func detectBirdVersion(birdCommand, envFallback string) string {
 
 	// Get the birdc binary (first arg)
 	birdcBin := args[0]
-	log.Printf("detectBirdVersion: birdc binary='%s'", birdcBin)
 
 	// Build command with show version
 	// Preserve socket path if present: -s /var/run/bird/bird.ctl
@@ -203,13 +201,11 @@ func detectBirdVersion(birdCommand, envFallback string) string {
 		}
 	}
 	versionArgs = append(versionArgs, "show", "status")
-	log.Printf("detectBirdVersion: version args=%v", versionArgs)
 
 	// Try birdc with socket path
 	cmd := exec.Command(birdcBin, versionArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("detectBirdVersion: 'show status' failed: %v, output: %s", err, strings.TrimSpace(string(output)))
 		// Detection failed, use env fallback or default to "2"
 		if envFallback != "" {
 			log.Printf("birdc detection failed, using env fallback: %s", envFallback)
@@ -218,7 +214,6 @@ func detectBirdVersion(birdCommand, envFallback string) string {
 		log.Printf("birdc detection failed, using default: 2")
 		return "2"
 	}
-	log.Printf("birdc output: %s", strings.TrimSpace(string(output)))
 
 	// Parse output to find version
 	// Output format: "BIRD 2.0.9" or "BIRD 3.2.0" or similar
@@ -229,11 +224,9 @@ func detectBirdVersion(birdCommand, envFallback string) string {
 			// Extract version number - look for version pattern after "BIRD"
 			// Handle formats like: "BIRD 2.0.9" or "BIRD version 3.2.0"
 			fields := strings.Fields(line)
-			log.Printf("parsing line '%s', fields: %v", line, fields)
 			for i, field := range fields {
 				// Check if this field looks like a version number (contains dots)
 				if strings.Contains(field, ".") && strings.Count(field, ".") >= 1 {
-					log.Printf("found potential version field: %s", field)
 					// Clean up the version string (remove any trailing characters)
 					version := field
 					// Extract just the version part (e.g., "2.0.9" or "3.2.0")
@@ -243,11 +236,9 @@ func detectBirdVersion(birdCommand, envFallback string) string {
 							break
 						}
 					}
-					log.Printf("cleaned version: %s", version)
 					// Validate it looks like a version (at least major.minor)
 					parts := strings.Split(version, ".")
 					if len(parts) >= 2 {
-						log.Printf("returning version: %s", version)
 						return version
 					}
 				}
