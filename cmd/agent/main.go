@@ -35,7 +35,8 @@ func runAgent() {
 	portalURL := getEnv("RTBH_PORTAL_URL", "localhost:50051")
 	agentName := getEnv("RTBH_AGENT_NAME", hostname())
 	hostName := hostname()
-	birdVersion := detectBirdVersion(getEnv("RTBH_BIRD_VERSION", ""))
+	birdCommand := getEnv("RTBH_BIRD_COMMAND", "birdc configure")
+	birdVersion := detectBirdVersion(birdCommand, getEnv("RTBH_BIRD_VERSION", ""))
 	birdOutput := getEnv("RTBH_BIRD_OUTPUT", "./data/rtbh_auto.conf")
 	birdPeersOutput := getEnv("RTBH_BIRD_PEERS_OUTPUT", "./data/rtbh_peers_auto.conf")
 	birdReload := getEnvBool("RTBH_BIRD_RELOAD", false)
@@ -175,13 +176,40 @@ func getEnvBool(key string, fallback bool) bool {
 
 // detectBirdVersion tries to detect BIRD version from birdc command.
 // Falls back to envFallback if detection fails.
-func detectBirdVersion(envFallback string) string {
-	// Try birdc show version first
-	cmd := exec.Command("birdc", "show", "version")
+func detectBirdVersion(birdCommand, envFallback string) string {
+	// Parse birdCommand to extract birdc binary and socket path
+	// Example: "birdc -s /var/run/bird/bird.ctl configure"
+	args := strings.Fields(birdCommand)
+	if len(args) == 0 {
+		args = []string{"birdc"}
+	}
+
+	// Get the birdc binary (first arg)
+	birdcBin := args[0]
+
+	// Build command with show version
+	// Preserve socket path if present: -s /var/run/bird/bird.ctl
+	versionArgs := []string{}
+	for i := 1; i < len(args); i++ {
+		if args[i] == "-s" && i+1 < len(args) {
+			// Include socket path
+			versionArgs = append(versionArgs, "-s", args[i+1])
+			i++ // skip next arg
+		} else if strings.HasPrefix(args[i], "-") {
+			// Skip other flags (like configure command)
+			continue
+		}
+	}
+	versionArgs = append(versionArgs, "show", "version")
+
+	// Try birdc with socket path
+	cmd := exec.Command(birdcBin, versionArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Try birdc version as fallback
-		cmd = exec.Command("birdc", "version")
+		// Try without "show" (some versions use just "version")
+		versionArgsSimple := versionArgs[:len(versionArgs)-2]
+		versionArgsSimple = append(versionArgsSimple, "version")
+		cmd = exec.Command(birdcBin, versionArgsSimple...)
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			// Detection failed, use env fallback or default to "2"
