@@ -46,9 +46,158 @@ RTBHID memiliki tiga mode operasi:
 
 ### Prerequisites
 
-- Go 1.21+
-- Node.js 18+ dan npm (untuk build frontend)
-- BIRD 2.x atau 3.x (untuk agent)
+#### System Requirements
+
+- **Operating System**: Linux (recommended), macOS, atau Windows dengan WSL2
+- **Architecture**: amd64 atau arm64
+- **Memory**: Minimal 512MB RAM
+- **Disk**: Minimal 100MB untuk binary dan database
+
+#### Software Dependencies
+
+##### 1. Go 1.21+
+
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt update
+sudo apt install -y golang-go
+```
+
+**Linux (RHEL/CentOS):**
+```bash
+sudo yum install -y golang
+```
+
+**macOS:**
+```bash
+brew install go
+```
+
+**Verifikasi:**
+```bash
+go version
+# Output: go version go1.21.x linux/amd64
+```
+
+##### 2. Node.js 18+ dan npm
+
+**Linux (Debian/Ubuntu):**
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+**Linux (RHEL/CentOS):**
+```bash
+curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+sudo yum install -y nodejs
+```
+
+**macOS:**
+```bash
+brew install node
+```
+
+**Verifikasi:**
+```bash
+node --version
+# Output: v20.x.x
+npm --version
+# Output: 10.x.x
+```
+
+##### 3. buf (Opsional - untuk regenerate protobuf)
+
+Hanya diperlukan jika Anda ingin mengubah file `.proto`:
+
+**Linux/macOS:**
+```bash
+# Using curl
+curl -sSL "https://github.com/bufbuild/buf/releases/latest/download/buf-$(uname -s)-$(uname -m)" \
+  -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf
+
+# Or using npm
+npm install -g @bufbuild/buf
+```
+
+**Verifikasi:**
+```bash
+buf --version
+# Output: 1.x.x
+```
+
+##### 4. BIRD 2.x atau 3.x (Hanya untuk Agent)
+
+BIRD hanya diperlukan jika Anda menjalankan **agent mode**.
+
+**Linux (Debian/Ubuntu):**
+```bash
+# BIRD 2
+sudo apt install -y bird2
+
+# Atau BIRD 3 (jika tersedia di repository)
+sudo apt install -y bird
+```
+
+**Linux (RHEL/CentOS):**
+```bash
+sudo yum install -y bird
+```
+
+**Build dari source (untuk versi terbaru):**
+```bash
+# Download dari https://bird.network.cz/
+wget https://bird.network.cz/download/bird-3.0.0.tar.gz
+tar xzf bird-3.0.0.tar.gz
+cd bird-3.0.0
+./configure
+make
+sudo make install
+```
+
+**Verifikasi:**
+```bash
+bird --version
+# Output: BIRD version 3.0.0
+
+birdc show status
+# Output: BIRD 3.0.0 ready.
+```
+
+#### npm Install Step
+
+**PENTING:** Anda perlu menjalankan `npm install` untuk menginstall dependencies frontend **sebelum** build pertama kali.
+
+```bash
+# Masuk ke direktori web
+cd web
+
+# Install dependencies
+npm install
+
+# Kembali ke root project
+cd ..
+```
+
+Ini akan menginstall semua dependencies yang diperlukan untuk build frontend, termasuk:
+- React
+- Vite
+- Tailwind CSS
+- shadcn/ui components
+- TypeScript
+
+**Catatan:** `npm install` hanya perlu dijalankan sekali, atau ketika ada perubahan di `package.json`.
+
+#### Summary Checklist
+
+Sebelum mulai build, pastikan semua prerequisites sudah terinstall:
+
+- [ ] Go 1.21+ (`go version`)
+- [ ] Node.js 18+ (`node --version`)
+- [ ] npm (`npm --version`)
+- [ ] (Opsional) buf (`buf --version`) - hanya jika regenerate protobuf
+- [ ] (Agent only) BIRD (`bird --version`)
+- [ ] Frontend dependencies sudah diinstall (`cd web && npm install`)
 
 ### Build Portal
 
