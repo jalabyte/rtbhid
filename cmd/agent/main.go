@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -34,7 +35,7 @@ func runAgent() {
 	portalURL := getEnv("RTBH_PORTAL_URL", "localhost:50051")
 	agentName := getEnv("RTBH_AGENT_NAME", hostname())
 	hostName := hostname()
-	birdVersion := getEnv("RTBH_BIRD_VERSION", "2")
+	birdVersion := detectBirdVersion(getEnv("RTBH_BIRD_VERSION", ""))
 	birdOutput := getEnv("RTBH_BIRD_OUTPUT", "./data/rtbh_auto.conf")
 	birdPeersOutput := getEnv("RTBH_BIRD_PEERS_OUTPUT", "./data/rtbh_peers_auto.conf")
 	birdReload := getEnvBool("RTBH_BIRD_RELOAD", false)
@@ -168,4 +169,51 @@ func getEnvBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return v == "true" || v == "1" || v == "yes"
+}
+
+// detectBirdVersion tries to detect BIRD version from birdc command.
+// Falls back to envFallback if detection fails.
+func detectBirdVersion(envFallback string) string {
+	// Try birdc show version first
+	cmd := exec.Command("birdc", "show", "version")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Try birdc version as fallback
+		cmd = exec.Command("birdc", "version")
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			// Detection failed, use env fallback or default to "2"
+			if envFallback != "" {
+				return envFallback
+			}
+			return "2"
+		}
+	}
+
+	// Parse output to find version
+	// Output format: "BIRD 2.0.9" or "BIRD 3.0.0" or similar
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "BIRD ") || strings.HasPrefix(line, "Bird ") {
+			// Extract version number
+			parts := strings.Fields(line)
+			for _, part := range parts {
+				// Look for version-like string (e.g., "2.0.9", "3.0.0")
+				if strings.Contains(part, ".") {
+					// Get major version
+					major := strings.Split(part, ".")[0]
+					if major == "2" || major == "3" {
+						return major
+					}
+				}
+			}
+		}
+	}
+
+	// Could not parse version, use env fallback or default to "2"
+	if envFallback != "" {
+		return envFallback
+	}
+	return "2"
 }
