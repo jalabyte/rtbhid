@@ -70,6 +70,8 @@ func runAgent() {
 	fmt.Printf("bird peers output: %s\n", birdPeersOutput)
 	fmt.Printf("bird reload: %v\n", birdReload)
 	fmt.Printf("local ASN: %d\n", localASN)
+	fmt.Printf("export std communities: %s\n", exportStd)
+	fmt.Printf("export large communities: %s\n", exportLarge)
 
 	if err := client.Run(ctx); err != nil {
 		log.Fatalf("agent error: %v", err)
@@ -191,20 +193,47 @@ func detectBirdVersion(envFallback string) string {
 	}
 
 	// Parse output to find version
-	// Output format: "BIRD 2.0.9" or "BIRD 3.0.0" or similar
+	// Output format: "BIRD 2.0.9" or "BIRD 3.2.0" or similar
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "BIRD ") || strings.HasPrefix(line, "Bird ") {
-			// Extract version number
-			parts := strings.Fields(line)
-			for _, part := range parts {
-				// Look for version-like string (e.g., "2.0.9", "3.0.0")
-				if strings.Contains(part, ".") {
-					// Get major version
-					major := strings.Split(part, ".")[0]
-					if major == "2" || major == "3" {
-						return major
+			// Extract version number - look for version pattern after "BIRD"
+			// Handle formats like: "BIRD 2.0.9" or "BIRD version 3.2.0"
+			fields := strings.Fields(line)
+			for i, field := range fields {
+				// Check if this field looks like a version number (contains dots)
+				if strings.Contains(field, ".") && strings.Count(field, ".") >= 1 {
+					// Clean up the version string (remove any trailing characters)
+					version := field
+					// Extract just the version part (e.g., "2.0.9" or "3.2.0")
+					for j, c := range version {
+						if !((c >= '0' && c <= '9') || c == '.') {
+							version = version[:j]
+							break
+						}
+					}
+					// Validate it looks like a version (at least major.minor)
+					parts := strings.Split(version, ".")
+					if len(parts) >= 2 {
+						return version
+					}
+				}
+				// Handle "BIRD version X.Y.Z" format
+				if strings.ToLower(field) == "version" && i+1 < len(fields) {
+					nextField := fields[i+1]
+					if strings.Contains(nextField, ".") {
+						version := nextField
+						for j, c := range version {
+							if !((c >= '0' && c <= '9') || c == '.') {
+								version = version[:j]
+								break
+							}
+						}
+						parts := strings.Split(version, ".")
+						if len(parts) >= 2 {
+							return version
+						}
 					}
 				}
 			}
