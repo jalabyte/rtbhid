@@ -202,30 +202,21 @@ func detectBirdVersion(birdCommand, envFallback string) string {
 			continue
 		}
 	}
-	versionArgs = append(versionArgs, "show", "version")
+	versionArgs = append(versionArgs, "show", "status")
 	log.Printf("detectBirdVersion: version args=%v", versionArgs)
 
 	// Try birdc with socket path
 	cmd := exec.Command(birdcBin, versionArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("detectBirdVersion: 'show version' failed: %v, output: %s", err, strings.TrimSpace(string(output)))
-		// Try without "show" (some versions use just "version")
-		versionArgsSimple := versionArgs[:len(versionArgs)-2]
-		versionArgsSimple = append(versionArgsSimple, "version")
-		log.Printf("detectBirdVersion: trying 'version' with args=%v", versionArgsSimple)
-		cmd = exec.Command(birdcBin, versionArgsSimple...)
-		output, err = cmd.CombinedOutput()
-		if err != nil {
-			log.Printf("detectBirdVersion: 'version' also failed: %v, output: %s", err, strings.TrimSpace(string(output)))
-			// Detection failed, use env fallback or default to "2"
-			if envFallback != "" {
-				log.Printf("birdc detection failed, using env fallback: %s", envFallback)
-				return envFallback
-			}
-			log.Printf("birdc detection failed, using default: 2")
-			return "2"
+		log.Printf("detectBirdVersion: 'show status' failed: %v, output: %s", err, strings.TrimSpace(string(output)))
+		// Detection failed, use env fallback or default to "2"
+		if envFallback != "" {
+			log.Printf("birdc detection failed, using env fallback: %s", envFallback)
+			return envFallback
 		}
+		log.Printf("birdc detection failed, using default: 2")
+		return "2"
 	}
 	log.Printf("birdc output: %s", strings.TrimSpace(string(output)))
 
