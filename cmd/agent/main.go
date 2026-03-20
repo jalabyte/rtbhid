@@ -179,6 +179,7 @@ func getEnvBool(key string, fallback bool) bool {
 func detectBirdVersion(birdCommand, envFallback string) string {
 	// Parse birdCommand to extract birdc binary and socket path
 	// Example: "birdc -s /var/run/bird/bird.ctl configure"
+	log.Printf("detectBirdVersion: parsing birdCommand='%s', envFallback='%s'", birdCommand, envFallback)
 	args := strings.Fields(birdCommand)
 	if len(args) == 0 {
 		args = []string{"birdc"}
@@ -186,6 +187,7 @@ func detectBirdVersion(birdCommand, envFallback string) string {
 
 	// Get the birdc binary (first arg)
 	birdcBin := args[0]
+	log.Printf("detectBirdVersion: birdc binary='%s'", birdcBin)
 
 	// Build command with show version
 	// Preserve socket path if present: -s /var/run/bird/bird.ctl
@@ -201,17 +203,21 @@ func detectBirdVersion(birdCommand, envFallback string) string {
 		}
 	}
 	versionArgs = append(versionArgs, "show", "version")
+	log.Printf("detectBirdVersion: version args=%v", versionArgs)
 
 	// Try birdc with socket path
 	cmd := exec.Command(birdcBin, versionArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		log.Printf("detectBirdVersion: 'show version' failed: %v, output: %s", err, strings.TrimSpace(string(output)))
 		// Try without "show" (some versions use just "version")
 		versionArgsSimple := versionArgs[:len(versionArgs)-2]
 		versionArgsSimple = append(versionArgsSimple, "version")
+		log.Printf("detectBirdVersion: trying 'version' with args=%v", versionArgsSimple)
 		cmd = exec.Command(birdcBin, versionArgsSimple...)
 		output, err = cmd.CombinedOutput()
 		if err != nil {
+			log.Printf("detectBirdVersion: 'version' also failed: %v, output: %s", err, strings.TrimSpace(string(output)))
 			// Detection failed, use env fallback or default to "2"
 			if envFallback != "" {
 				log.Printf("birdc detection failed, using env fallback: %s", envFallback)
