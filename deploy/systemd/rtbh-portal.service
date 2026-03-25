@@ -1,0 +1,16 @@
+[Unit]
+Description=RTBH Portal
+After=network.target
+
+[Service]
+Type=simple
+User=rtbhd
+Group=bird
+EnvironmentFile=/etc/default/rtbh-portal
+ExecStart=/usr/local/bin/rtbh-portal
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=/var/lib/rtbh-portal
+
+[Install]
+WantedBy=multi-user.target

@@ -16,6 +16,7 @@ import (
 type Server struct {
 	svc  *app.Service
 	auth *authManager
+	gw   *Gateway
 }
 
 func NewServer(svc *app.Service, authCfg AuthConfig) (*Server, error) {
@@ -24,6 +25,11 @@ func NewServer(svc *app.Service, authCfg AuthConfig) (*Server, error) {
 		return nil, err
 	}
 	return &Server{svc: svc, auth: auth}, nil
+}
+
+// SetGateway attaches a Gateway for agent-facing REST endpoints.
+func (s *Server) SetGateway(gw *Gateway) {
+	s.gw = gw
 }
 
 func (s *Server) Handler() http.Handler {
@@ -50,6 +56,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/peers", s.handlePeers)
 	mux.HandleFunc("/api/v1/peers/bulk", s.handlePeerBulk)
 	mux.HandleFunc("/api/v1/peers/", s.handlePeerByID)
+
+	// Agent-facing gateway routes (if gateway is attached)
+	if s.gw != nil {
+		mux.HandleFunc("/api/v1/register", s.gw.Register)
+		mux.HandleFunc("/api/v1/heartbeat", s.gw.Heartbeat)
+		mux.HandleFunc("/api/v1/config", s.gw.Config)
+	}
 
 	return withLogging(withCORS(s.auth.requireAuth(mux)))
 }

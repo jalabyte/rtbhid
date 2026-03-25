@@ -2,3 +2,7 @@
 rtbhd
 /data/*.json
 /data/*.conf
+/agent
+/portal
+/data/*.db
+.DS_Store

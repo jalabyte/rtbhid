@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="RTBH Portal - Remote Triggered Black Hole Controller for DDoS mitigation"
+    />
+    <meta name="author" content="PT Jala Informatika Nusantara" />
+    <title>Login - RTBH Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --background: 0 0% 100%;
+        --foreground: 222.2 84% 4.9%;
+        --card: 0 0% 100%;
+        --card-foreground: 222.2 84% 4.9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 222.2 84% 4.9%;
+        --primary: 222.2 47.4% 11.2%;
+        --primary-foreground: 210 40% 98%;
+        --secondary: 210 40% 96.1%;
+        --secondary-foreground: 222.2 47.4% 11.2%;
+        --muted: 210 40% 96.1%;
+        --muted-foreground: 215.4 16.3% 46.9%;
+        --accent: 210 40% 96.1%;
+        --accent-foreground: 222.2 47.4% 11.2%;
+        --destructive: 0 84.2% 60.2%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 214.3 31.8% 91.4%;
+        --input: 214.3 31.8% 91.4%;
+        --ring: 222.2 84% 4.9%;
+        --radius: 0.5rem;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        font-family:
+          "Inter",
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+        color: hsl(var(--foreground));
+        background: hsl(var(--background));
+        line-height: 1.5;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+
+      .header {
+        border-bottom: 1px solid hsl(var(--border));
+        padding: 1rem 1.5rem;
+        background: hsl(var(--card));
+      }
+
+      .header-content {
+        max-width: 1200px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .logo {
+        width: 32px;
+        height: 32px;
+        background: hsl(var(--primary));
+        border-radius: var(--radius);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: hsl(var(--primary-foreground));
+        font-weight: 700;
+        font-size: 14px;
+      }
+
+      .brand {
+        font-weight: 600;
+        font-size: 1.125rem;
+        color: hsl(var(--foreground));
+      }
+
+      .main {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+        background: linear-gradient(
+          180deg,
+          hsl(var(--background)) 0%,
+          hsl(var(--muted)) 100%
+        );
+      }
+
+      .card {
+        width: 100%;
+        max-width: 400px;
+        background: hsl(var(--card));
+        border: 1px solid hsl(var(--border));
+        border-radius: var(--radius);
+        padding: 2rem;
+        box-shadow:
+          0 4px 6px -1px rgba(0, 0, 0, 0.1),
+          0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        animation: fadeIn 0.3s ease-out;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .card-header {
+        text-align: center;
+        margin-bottom: 1.5rem;
+      }
+
+      .card-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin: 0 0 0.5rem;
+        color: hsl(var(--foreground));
+      }
+
+      .card-description {
+        font-size: 0.875rem;
+        color: hsl(var(--muted-foreground));
+        margin: 0;
+      }
+
+      .form-group {
+        margin-bottom: 1rem;
+      }
+
+      label {
+        display: block;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: hsl(var(--foreground));
+        margin-bottom: 0.5rem;
+      }
+
+      input {
+        width: 100%;
+        padding: 0.625rem 0.75rem;
+        border: 1px solid hsl(var(--input));
+        border-radius: var(--radius);
+        font-size: 0.875rem;
+        font-family: inherit;
+        background: hsl(var(--background));
+        color: hsl(var(--foreground));
+        transition:
+          border-color 0.15s ease,
+          box-shadow 0.15s ease;
+      }
+
+      input:focus {
+        outline: none;
+        border-color: hsl(var(--ring));
+        box-shadow: 0 0 0 3px hsl(var(--ring) / 0.1);
+      }
+
+      button {
+        width: 100%;
+        padding: 0.625rem 1rem;
+        border: none;
+        border-radius: var(--radius);
+        background: hsl(var(--primary));
+        color: hsl(var(--primary-foreground));
+        font-size: 0.875rem;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        transition:
+          background-color 0.15s ease,
+          transform 0.1s ease;
+        margin-top: 0.5rem;
+      }
+
+      button:hover {
+        background: hsl(var(--primary) / 0.9);
+      }
+
+      button:active {
+        transform: scale(0.98);
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      #error {
+        margin-top: 0.75rem;
+        padding: 0.75rem;
+        background: hsl(var(--destructive) / 0.1);
+        border: 1px solid hsl(var(--destructive) / 0.2);
+        border-radius: var(--radius);
+        color: hsl(var(--destructive));
+        font-size: 0.875rem;
+        display: none;
+      }
+
+      #error.show {
+        display: block;
+      }
+
+      .footer {
+        border-top: 1px solid hsl(var(--border));
+        padding: 1.5rem;
+        background: hsl(var(--card));
+        text-align: center;
+      }
+
+      .footer-content {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      .footer-text {
+        font-size: 0.75rem;
+        color: hsl(var(--muted-foreground));
+        line-height: 1.5;
+      }
+
+      .footer-text a {
+        color: hsl(var(--foreground));
+        text-decoration: none;
+        font-weight: 500;
+      }
+
+      .footer-text a:hover {
+        text-decoration: underline;
+      }
+
+      .footer-divider {
+        margin: 0 0.5rem;
+        color: hsl(var(--border));
+      }
+    </style>
+  </head>
+  <body>
+    <header class="header">
+      <div class="header-content">
+        <div class="logo">R</div>
+        <span class="brand">RTBH Portal</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="card">
+        <div class="card-header">
+          <h1 class="card-title">Welcome back</h1>
+          <p class="card-description">
+            Sign in to access the dashboard and manage your network
+          </p>
+        </div>
+
+        <form id="login-form">
+          <div class="form-group">
+            <label for="username">Username</label>
+            <input
+              id="username"
+              type="text"
+              autocomplete="username"
+              placeholder="Enter your username"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Enter your password"
+              required
+            />
+          </div>
+
+          <button type="submit">Sign In</button>
+          <div id="error"></div>
+        </form>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-content">
+        <p class="footer-text">Made with ❤️ and ☕ @ 2026</p>
+        <p class="footer-text" style="margin-top: 0.5rem">
+          Coded by
+          <a href="https://jalabyte.com" target="_blank" rel="noopener"
+            >PT Jala Informatika Nusantara</a
+          >
+          <span class="footer-divider">•</span>
+          Idea from: Rifqi Arief Pamungkas (Rapdodge)
+        </p>
+      </div>
+    </footer>
+
+    <script>
+      const form = document.getElementById("login-form");
+      const errBox = document.getElementById("error");
+      const submitBtn = form.querySelector("button");
+
+      form.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        errBox.classList.remove("show");
+        errBox.textContent = "";
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Signing in...";
+
+        const username = document.getElementById("username").value.trim();
+        const password = document.getElementById("password").value;
+
+        try {
+          const res = await fetch("/api/v1/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ username, password }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(body.error || "Invalid credentials");
+          }
+          window.location.href = "/";
+        } catch (err) {
+          errBox.textContent = err.message;
+          errBox.classList.add("show");
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Sign In";
+        }
+      });
+    </script>
+  </body>
+</html>
