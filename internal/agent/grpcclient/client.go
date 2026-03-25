@@ -34,6 +34,10 @@ type Config struct {
 	LocalASN          int
 	ExportStdComms    string
 	ExportLargeComms  string
+
+	// GRPCMaxRecvMsgSize is the maximum message size in bytes the client
+	// will accept. If 0, uses gRPC default (4MB).
+	GRPCMaxRecvMsgSize int
 }
 
 // Client connects to the portal and manages Bird config locally.
@@ -67,8 +71,13 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 	c.cfg.AgentID = agentID
 
+	maxRecvSize := c.cfg.GRPCMaxRecvMsgSize
+	if maxRecvSize <= 0 {
+		maxRecvSize = 4 * 1024 * 1024 // gRPC default
+	}
 	conn, err := grpc.NewClient(c.cfg.PortalURL,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxRecvSize)),
 	)
 	if err != nil {
 		return fmt.Errorf("connect to portal: %w", err)

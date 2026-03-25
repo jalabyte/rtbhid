@@ -44,20 +44,22 @@ func runAgent() {
 	localASN := getEnvInt("RTBH_LOCAL_ASN", 65500)
 	exportStd := getEnv("RTBH_EXPORT_STD_COMMUNITIES", "")
 	exportLarge := getEnv("RTBH_EXPORT_LARGE_COMMUNITIES", "")
+	grpcMaxMsgSize := getEnvInt("RTBH_GRPC_MAX_MSG_SIZE", 0)
 
 	client := grpcclient.New(grpcclient.Config{
-		PortalURL:         portalURL,
-		AgentName:         agentName,
-		Hostname:          hostName,
-		BirdVersion:       birdVersion,
-		AgentVersion:      "2.0.0",
-		BirdOutputPath:    birdOutput,
-		BirdPeersOutput:   birdPeersOutput,
-		BirdReloadEnabled: birdReload,
-		BirdCommand:       birdCmd,
-		LocalASN:          localASN,
-		ExportStdComms:    exportStd,
-		ExportLargeComms:  exportLarge,
+		PortalURL:          portalURL,
+		AgentName:          agentName,
+		Hostname:           hostName,
+		BirdVersion:        birdVersion,
+		AgentVersion:       "2.0.0",
+		BirdOutputPath:     birdOutput,
+		BirdPeersOutput:    birdPeersOutput,
+		BirdReloadEnabled:  birdReload,
+		BirdCommand:        birdCmd,
+		LocalASN:           localASN,
+		ExportStdComms:     exportStd,
+		ExportLargeComms:   exportLarge,
+		GRPCMaxRecvMsgSize: grpcMaxMsgSize,
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -73,6 +75,7 @@ func runAgent() {
 	fmt.Printf("local ASN: %d\n", localASN)
 	fmt.Printf("export std communities: %s\n", exportStd)
 	fmt.Printf("export large communities: %s\n", exportLarge)
+	fmt.Printf("gRPC max msg size: %d bytes\n", grpcMaxMsgSize)
 
 	if err := client.Run(ctx); err != nil {
 		log.Fatalf("agent error: %v", err)
