@@ -189,4 +189,14 @@ export const api = {
 
   getEvents: (limit = 100) =>
     fetchJSON<{ items: Event[] }>(`/events?limit=${limit}`),
+
+  lookup: (queries: string[]) =>
+    fetch(`${BASE}/lookup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ queries }),
+    }).then(async (res) => {
+      if (!res.ok) throw new Error(await res.text());
+      return res.json() as Promise<LookupResponse>;
+    }),
 };

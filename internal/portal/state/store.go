@@ -586,11 +586,155 @@ func (s *Store) EffectivePrefixes() []string {
 }
 
 // --------------------------------------------------------------------------
-// LookupIP - stub implementation
+// LookupIP - query IP/CIDR against sources, manual prefixes, and excludes
 // --------------------------------------------------------------------------
 
 func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
-	return nil, fmt.Errorf("LookupIP: not implemented")
+	if len(queries) == 0 {
+		return []LookupResult{}, nil
+	}
+
+	results := make([]LookupResult, 0, len(queries))
+
+	for _, query := range queries {
+		normalized, err := normalizeCIDR(query)
+		if err != nil {
+			return nil, fmt.Errorf("invalid query '%s': %w", query, err)
+		}
+
+		var queryAddr netip.Addr
+		if p, err := netip.ParsePrefix(normalized); err == nil {
+			queryAddr = p.Addr()
+		} else if addr, err := netip.ParseAddr(normalized); err == nil {
+			queryAddr = addr
+		} else {
+			return nil, fmt.Errorf("invalid query '%s': %w", query, err)
+		}
+
+		result := LookupResult{
+			Query:   query,
+			Matches: []LookupMatch{},
+		}
+
+		var matches []LookupMatch
+
+		sourceRows, err := s.db.Query(`
+			SELECT s.id, s.name, sp.cidr, s.created_at
+			FROM source_prefixes sp
+			INNER JOIN sources s ON s.id = sp.source_id
+			WHERE s.enabled = 1`)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query sources: %w", err)
+		}
+		for sourceRows.Next() {
+			var sourceID, sourceName, cidr string
+			var createdAt time.Time
+			if err := sourceRows.Scan(&sourceID, &sourceName, &cidr, &createdAt); err != nil {
+				continue
+			}
+			if prefix, err := netip.ParsePrefix(cidr); err == nil {
+				if prefix.Contains(queryAddr) {
+					matches = append(matches, LookupMatch{
+						Type:       "source",
+						SourceID:   sourceID,
+						SourceName: sourceName,
+						CIDR:       cidr,
+						CreatedAt:  createdAt,
+					})
+				}
+			}
+		}
+		sourceRows.Close()
+
+		prefixRows, err := s.db.Query(`
+			SELECT cidr, note, created_at
+			FROM prefixes
+			WHERE enabled = 1`)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query prefixes: %w", err)
+		}
+		for prefixRows.Next() {
+			var cidr, note string
+			var createdAt time.Time
+			if err := prefixRows.Scan(&cidr, &note, &createdAt); err != nil {
+				continue
+			}
+			if prefix, err := netip.ParsePrefix(cidr); err == nil {
+				if prefix.Contains(queryAddr) {
+					matches = append(matches, LookupMatch{
+						Type:      "manual",
+						CIDR:      cidr,
+						Note:      note,
+						CreatedAt: createdAt,
+					})
+				}
+			}
+		}
+		prefixRows.Close()
+
+		excludeSet := make(map[string]bool)
+		var excludeParsed []netip.Prefix
+
+		excludeRows, err := s.db.Query(`SELECT cidr FROM excludes`)
+		if err == nil {
+			for excludeRows.Next() {
+				var cidr string
+				if err := excludeRows.Scan(&cidr); err == nil {
+					excludeSet[cidr] = true
+					if pref, err := netip.ParsePrefix(cidr); err == nil {
+						excludeParsed = append(excludeParsed, pref.Masked())
+					}
+				}
+			}
+			excludeRows.Close()
+		}
+
+		excludeSourceRows, err := s.db.Query(`
+			SELECT esp.cidr FROM exclude_source_prefixes esp
+			INNER JOIN exclude_sources es ON es.id = esp.source_id
+			WHERE es.enabled = 1`)
+		if err == nil {
+			for excludeSourceRows.Next() {
+				var cidr string
+				if err := excludeSourceRows.Scan(&cidr); err == nil {
+					excludeSet[cidr] = true
+					if pref, err := netip.ParsePrefix(cidr); err == nil {
+						excludeParsed = append(excludeParsed, pref.Masked())
+					}
+				}
+			}
+			excludeSourceRows.Close()
+		}
+
+		filteredMatches := make([]LookupMatch, 0, len(matches))
+		for _, match := range matches {
+			if excludeSet[match.CIDR] {
+				continue
+			}
+			if pref, err := netip.ParsePrefix(match.CIDR); err == nil {
+				if isExcludedByCIDR(pref, excludeParsed) {
+					continue
+				}
+			}
+			filteredMatches = append(filteredMatches, match)
+		}
+
+		sort.Slice(filteredMatches, func(i, j int) bool {
+			var bitsI, bitsJ int
+			if pref, err := netip.ParsePrefix(filteredMatches[i].CIDR); err == nil {
+				bitsI = pref.Bits()
+			}
+			if pref, err := netip.ParsePrefix(filteredMatches[j].CIDR); err == nil {
+				bitsJ = pref.Bits()
+			}
+			return bitsI > bitsJ
+		})
+
+		result.Matches = filteredMatches
+		results = append(results, result)
+	}
+
+	return results, nil
 }
 
 // --------------------------------------------------------------------------

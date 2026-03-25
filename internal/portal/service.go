@@ -375,6 +375,7 @@ func (s *Service) syncExcludeSource(src state.Source) {
 
 func (s *Service) ListAgents() []state.Agent              { return s.store.ListAgents() }
 func (s *Service) GetAgent(id string) (state.Agent, bool) { return s.store.GetAgent(id) }
+func (s *Service) Store() *state.Store                    { return s.store }
 func (s *Service) DeleteAgent(id string) error {
 	if err := s.store.DeleteAgent(id); err != nil {
 		return err

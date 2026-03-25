@@ -78,6 +78,9 @@ func (s *Server) Handler() http.Handler {
 	// Events
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
 
+	// Lookup
+	mux.HandleFunc("/api/v1/lookup", s.handleLookup)
+
 	// Agent communication
 	mux.HandleFunc("/api/v1/register", s.handleRegister)
 	mux.HandleFunc("/api/v1/heartbeat", s.handleHeartbeat)
@@ -818,4 +821,41 @@ func withLogging(next http.Handler) http.Handler {
 		fmt.Printf("%s %s\n", r.Method, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Lookup
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		Queries []string `json:"queries"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if len(req.Queries) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("queries array is required"))
+		return
+	}
+
+	if len(req.Queries) > 10 {
+		writeError(w, http.StatusBadRequest, errors.New("maximum 10 queries allowed"))
+		return
+	}
+
+	results, err := s.svc.Store().LookupIP(req.Queries)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }

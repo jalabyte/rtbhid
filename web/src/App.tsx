@@ -8,6 +8,7 @@ import Excludes from "./pages/Excludes";
 import Peers from "./pages/Peers";
 import Events from "./pages/Events";
 import Docs from "./pages/Docs";
+import Lookup from "./pages/Lookup";
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/excludes" element={<Excludes />} />
             <Route path="/peers" element={<Peers />} />
             <Route path="/events" element={<Events />} />
+            <Route path="/lookup" element={<Lookup />} />
             <Route path="/docs" element={<Docs />} />
           </Routes>
         </main>

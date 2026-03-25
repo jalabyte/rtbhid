@@ -7,7 +7,18 @@
     "ses_2daffae96ffeBPuxr7E94csI7v",
     "ses_2daffbfe1ffeRW7mpiFKLgvk6m",
     "ses_2daffceadffeAfaa7U1dS9eg5n",
-    "ses_2daffa0c0ffeJpNWf249PcJ4yL"
+    "ses_2daffa0c0ffeJpNWf249PcJ4yL",
+    "ses_2daf5ed4fffeO2MGCxjKK4k8IZ",
+    "ses_2daf60cffffes6sJIrzOZ0jlmx",
+    "ses_2daf5fb32ffecHlkbNYw0iJdaz",
+    "ses_2daed962effedbXnM6JMl0fzeq",
+    "ses_2daedb474ffepVKG38CN4THqq0",
+    "ses_2dae4876dffeA40VzmcNckN5iF",
+    "ses_2dae16955ffeSJCb9HKDF7rEHo",
+    "ses_2dab13949ffeWpRnH2nArZx5tZ",
+    "ses_2dab12730ffeUkijDmNdcvr3SP",
+    "ses_2daabe6f8ffeS36HAthuOagHfz",
+    "ses_2daa963ecffeHVwiRyZSYUWq8C"
   ],
   "plan_name": "ip-lookup-page",
   "agent": "atlas",
@@ -20,6 +31,41 @@
       "agent": "Sisyphus-Junior",
       "category": "quick",
       "updated_at": "2026-03-25T12:39:44.592Z"
+    },
+    "todo:6": {
+      "task_key": "todo:6",
+      "task_label": "6",
+      "task_title": "Write backend unit tests (RED)",
+      "session_id": "ses_2daf60cffffes6sJIrzOZ0jlmx",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-03-25T12:51:23.126Z"
+    },
+    "todo:7": {
+      "task_key": "todo:7",
+      "task_label": "7",
+      "task_title": "Implement LookupIP method (GREEN)",
+      "session_id": "ses_2dab13949ffeWpRnH2nArZx5tZ",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-03-25T14:05:50.827Z"
+    },
+    "final-wave:f1": {
+      "task_key": "final-wave:f1",
+      "task_label": "F1",
+      "task_title": "**Plan Compliance Audit** — `oracle`",
+      "session_id": "ses_2daabe6f8ffeS36HAthuOagHfz",
+      "agent": "oracle",
+      "updated_at": "2026-03-25T14:11:28.487Z"
+    },
+    "final-wave:f2": {
+      "task_key": "final-wave:f2",
+      "task_label": "F2",
+      "task_title": "**Code Quality Review** — `unspecified-high`",
+      "session_id": "ses_2daa963ecffeHVwiRyZSYUWq8C",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-03-25T14:15:06.150Z"
     }
   }
 }

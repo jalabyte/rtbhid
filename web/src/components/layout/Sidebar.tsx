@@ -9,6 +9,7 @@ import {
   ScrollText,
   LogOut,
   BookOpen,
+  Search,
 } from "lucide-react";
 import { NavLink } from "react-router";
 import { api } from "@/lib/api";
@@ -22,6 +23,7 @@ const navItems = [
   { to: "/excludes", icon: ShieldOff, label: "Excludes" },
   { to: "/peers", icon: Network, label: "Peers" },
   { to: "/events", icon: ScrollText, label: "Events" },
+  { to: "/lookup", icon: Search, label: "Lookup" },
   { to: "/docs", icon: BookOpen, label: "Docs", external: true },
 ];
 

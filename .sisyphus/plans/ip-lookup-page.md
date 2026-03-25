@@ -171,7 +171,7 @@ Wave FINAL (After ALL tasks — verification):
 
 ## TODOs
 
-- [x] 1. Setup vitest for frontend testing
+- [x] 1. Setup vitest for frontend testing (DONE)
 
   **What to do**:
   - Install vitest and @vitest/ui as dev dependencies
@@ -310,7 +310,7 @@ Wave FINAL (After ALL tasks — verification):
 
 ---
 
-- [ ] 6. Write backend unit tests (RED)
+- [x] 6. Write backend unit tests (RED)
 
   **What to do**:
   - Write table-driven tests for LookupIP covering:
@@ -345,7 +345,7 @@ Wave FINAL (After ALL tasks — verification):
 
 ---
 
-- [ ] 7. Implement LookupIP method (GREEN)
+- [x] 7. Implement LookupIP method (GREEN)
 
   **What to do**:
   - Implement `LookupIP(queries []string) ([]LookupResult, error)`
@@ -377,7 +377,7 @@ Wave FINAL (After ALL tasks — verification):
 
 ---
 
-- [ ] 8. Write API tests (RED)
+- [x] 8. Write API tests (RED)
 
   **What to do**:
   - Create `internal/portal/httpapi/server_lookup_test.go`
@@ -401,7 +401,7 @@ Wave FINAL (After ALL tasks — verification):
 
 ---
 
-- [ ] 9. Implement API endpoint (GREEN)
+- [x] 9. Implement API endpoint (GREEN)
 
   **What to do**:
   - Add `handleLookup()` handler in `server.go`
@@ -433,7 +433,7 @@ Wave FINAL (After ALL tasks — verification):
 
 ---
 
-- [ ] 10. Implement frontend API client
+- [x] 10. Implement frontend API client
 
   **What to do**:
   - Add `lookup(queries: string[]): Promise<LookupResponse>` method to `api.ts`
@@ -462,7 +462,7 @@ Wave FINAL (After ALL tasks — verification):
 
 ---
 
-- [ ] 11. Write frontend tests (RED)
+- [x] 11. Write frontend tests (RED)
 
   **What to do**:
   - Create `web/src/pages/Lookup.test.tsx`
@@ -490,7 +490,7 @@ Wave FINAL (After ALL tasks — verification):
 
 ---
 
-- [ ] 12. Implement Lookup page component
+- [x] 12. Implement Lookup page component
 
   **What to do**:
   - Create `web/src/pages/Lookup.tsx`
@@ -527,7 +527,7 @@ Wave FINAL (After ALL tasks — verification):
 
 ---
 
-- [ ] 13. Add navigation integration
+- [x] 13. Add navigation integration
 
   **What to do**:
   - Add route in `web/src/App.tsx`: `<Route path="/lookup" element={<Lookup />} />`
@@ -557,7 +557,7 @@ Wave FINAL (After ALL tasks — verification):
 
 ---
 
-- [ ] 14. Add frontend form validation
+- [x] 14. Add frontend form validation
 
   **What to do**:
   - Add client-side validation using `ipaddr.js`
@@ -590,7 +590,7 @@ Wave FINAL (After ALL tasks — verification):
 
 ## Final Verification Wave
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Verify all "Must Have" items are implemented. Check evidence files exist. Compare deliverables against plan.
 
 - [ ] F2. **Code Quality Review** — `unspecified-high`
