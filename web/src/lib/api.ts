@@ -109,6 +109,18 @@ export interface LookupResponse {
   results: LookupResult[];
 }
 
+export interface PrefixBuilderResponse {
+  asn: string;
+  count: number;
+  prefixes: string[];
+}
+
+export interface BulkAddResponse {
+  created: number;
+  skipped: number;
+  invalid: number;
+}
+
 export const api = {
   getStatus: () => fetchJSON<Status>("/status"),
 
@@ -189,6 +201,16 @@ export const api = {
 
   getEvents: (limit = 100) =>
     fetchJSON<{ items: Event[] }>(`/events?limit=${limit}`),
+
+  buildPrefixesFromASN: (data: {
+    asn: string;
+    ipv4?: boolean;
+    ipv6?: boolean;
+  }) => postJSON<PrefixBuilderResponse>("/prefix-builder", data),
+  bulkAddPrefixes: (data: { items: string[]; note: string }) =>
+    postJSON<BulkAddResponse>("/prefixes/bulk", data),
+  bulkAddExcludes: (data: { items: string[]; note: string }) =>
+    postJSON<BulkAddResponse>("/excludes/bulk", data),
 
   lookup: (queries: string[]) =>
     fetch(`${BASE}/lookup`, {

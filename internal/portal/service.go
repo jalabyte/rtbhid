@@ -157,6 +157,18 @@ func (s *Service) CreatePrefix(cidr, note string) (state.Prefix, error) {
 	return p, nil
 }
 
+func (s *Service) BulkCreatePrefixes(cidrs []string, note string) (created int, skipped int, invalid int, err error) {
+	created, skipped, invalid, err = s.store.BulkCreatePrefixes(cidrs, note)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	_ = s.store.AddEvent("prefix.bulk_create", fmt.Sprintf("bulk created prefixes: created=%d skipped=%d invalid=%d", created, skipped, invalid), "")
+	if created > 0 {
+		s.PushConfigToAll()
+	}
+	return created, skipped, invalid, nil
+}
+
 func (s *Service) DeletePrefix(id int64) error {
 	if err := s.store.DeletePrefix(id); err != nil {
 		return err
@@ -293,6 +305,18 @@ func (s *Service) AddExclude(cidr, note string) (state.Exclude, error) {
 	_ = s.store.AddEvent("exclude.create", fmt.Sprintf("created exclude %s", cidr), "")
 	s.PushConfigToAll()
 	return ex, nil
+}
+
+func (s *Service) BulkCreateExcludes(cidrs []string, note string) (created int, skipped int, invalid int, err error) {
+	created, skipped, invalid, err = s.store.BulkCreateExcludes(cidrs, note)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	_ = s.store.AddEvent("exclude.bulk_create", fmt.Sprintf("bulk created excludes: created=%d skipped=%d invalid=%d", created, skipped, invalid), "")
+	if created > 0 {
+		s.PushConfigToAll()
+	}
+	return created, skipped, invalid, nil
 }
 
 func (s *Service) DeleteExclude(id int64) error {

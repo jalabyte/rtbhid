@@ -19,6 +19,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/agents", icon: Server, label: "Agents" },
   { to: "/prefixes", icon: List, label: "Prefixes" },
+  { to: "/prefix-builder", icon: List, label: "Prefix Builder" },
   { to: "/sources", icon: Globe, label: "Sources" },
   { to: "/excludes", icon: ShieldOff, label: "Excludes" },
   { to: "/peers", icon: Network, label: "Peers" },

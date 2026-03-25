@@ -146,6 +146,44 @@ func (s *Store) CreatePrefix(p Prefix) (Prefix, error) {
 	return p, nil
 }
 
+func (s *Store) BulkCreatePrefixes(cidrs []string, note string) (created int, skipped int, invalid int, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO prefixes (cidr, enabled, note, created_at) VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer stmt.Close()
+
+	now := time.Now().UTC()
+	for _, cidr := range cidrs {
+		normed, err := normalizeCIDR(cidr)
+		if err != nil {
+			invalid++
+			continue
+		}
+		res, err := stmt.Exec(normed, true, note, now)
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		affected, _ := res.RowsAffected()
+		if affected > 0 {
+			created++
+		} else {
+			skipped++
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, 0, 0, err
+	}
+	return created, skipped, invalid, nil
+}
+
 func (s *Store) ListPrefixes() []Prefix {
 	rows, err := s.db.Query(`SELECT id, cidr, enabled, note, created_at FROM prefixes ORDER BY cidr`)
 	if err != nil {
@@ -292,6 +330,44 @@ func (s *Store) CreateExclude(ex Exclude) (Exclude, error) {
 	}
 	ex.ID, _ = res.LastInsertId()
 	return ex, nil
+}
+
+func (s *Store) BulkCreateExcludes(cidrs []string, note string) (created int, skipped int, invalid int, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO excludes (cidr, note, created_at) VALUES (?, ?, ?)`)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer stmt.Close()
+
+	now := time.Now().UTC()
+	for _, cidr := range cidrs {
+		normed, err := normalizeCIDR(cidr)
+		if err != nil {
+			invalid++
+			continue
+		}
+		res, err := stmt.Exec(normed, note, now)
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		affected, _ := res.RowsAffected()
+		if affected > 0 {
+			created++
+		} else {
+			skipped++
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, 0, 0, err
+	}
+	return created, skipped, invalid, nil
 }
 
 func (s *Store) ListExcludes() []Exclude {

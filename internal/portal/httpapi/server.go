@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"rtbhid/internal/portal"
 	"rtbhid/internal/portal/state"
@@ -56,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Prefixes
 	mux.HandleFunc("/api/v1/prefixes", s.handlePrefixes)
+	mux.HandleFunc("/api/v1/prefixes/bulk", s.handlePrefixBulk)
 	mux.HandleFunc("/api/v1/prefixes/", s.handlePrefixByID)
 
 	// Sources
@@ -64,6 +67,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Excludes
 	mux.HandleFunc("/api/v1/excludes", s.handleExcludes)
+	mux.HandleFunc("/api/v1/excludes/bulk", s.handleExcludeBulk)
 	mux.HandleFunc("/api/v1/excludes/", s.handleExcludeByID)
 
 	// Exclude Sources
@@ -80,6 +84,9 @@ func (s *Server) Handler() http.Handler {
 
 	// Lookup
 	mux.HandleFunc("/api/v1/lookup", s.handleLookup)
+
+	// Prefix builder
+	mux.HandleFunc("/api/v1/prefix-builder", s.handlePrefixBuilder)
 
 	// Agent communication
 	mux.HandleFunc("/api/v1/register", s.handleRegister)
@@ -271,6 +278,35 @@ func (s *Server) handlePrefixes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handlePrefixBulk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		Items []string `json:"items"`
+		Note  string   `json:"note"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if len(req.Items) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("items array is required"))
+		return
+	}
+	created, skipped, invalid, err := s.svc.BulkCreatePrefixes(req.Items, strings.TrimSpace(req.Note))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"created": created,
+		"skipped": skipped,
+		"invalid": invalid,
+	})
+}
+
 func (s *Server) handlePrefixByID(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/prefixes/")
 	if rest == "" {
@@ -428,6 +464,35 @@ func (s *Server) handleExcludes(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func (s *Server) handleExcludeBulk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		Items []string `json:"items"`
+		Note  string   `json:"note"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if len(req.Items) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("items array is required"))
+		return
+	}
+	created, skipped, invalid, err := s.svc.BulkCreateExcludes(req.Items, strings.TrimSpace(req.Note))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"created": created,
+		"skipped": skipped,
+		"invalid": invalid,
+	})
 }
 
 func (s *Server) handleExcludeByID(w http.ResponseWriter, r *http.Request) {
@@ -858,4 +923,49 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+func (s *Server) handlePrefixBuilder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		ASN  string `json:"asn"`
+		IPv4 *bool  `json:"ipv4"`
+		IPv6 *bool  `json:"ipv6"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	ipv4 := true
+	ipv6 := true
+	if req.IPv4 != nil {
+		ipv4 = *req.IPv4
+	}
+	if req.IPv6 != nil {
+		ipv6 = *req.IPv6
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	prefixes, err := s.svc.BuildPrefixesFromASN(ctx, req.ASN, ipv4, ipv6)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, portal.ErrInvalidASN) || errors.Is(err, portal.ErrNoAddressFamily) {
+			status = http.StatusBadRequest
+		}
+		writeError(w, status, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"asn":      req.ASN,
+		"count":    len(prefixes),
+		"prefixes": prefixes,
+	})
 }
