@@ -399,6 +399,7 @@ RTBH_BIRD_COMMAND='birdc -s /var/run/bird/bird.ctl configure' \
 |----------|---------|-------------|
 | `RTBH_LISTEN_ADDR` | `:8088` | HTTP listen address |
 | `RTBH_GRPC_ADDR` | `:50051` | gRPC listen address |
+| `RTBH_GRPC_MAX_MSG_SIZE` | `0` (4MB default) | gRPC max message size in bytes |
 | `RTBH_DB_PATH` | `./data/portal.db` | SQLite database path |
 | `RTBH_LOCAL_ASN` | `65500` | Local ASN untuk semua agent |
 | `RTBH_SCHEDULER_TICK_SECONDS` | `15` | Interval sync check |
@@ -414,6 +415,7 @@ RTBH_BIRD_COMMAND='birdc -s /var/run/bird/bird.ctl configure' \
 |----------|---------|-------------|
 | `RTBH_MODE` | `standalone` | `agent` atau `standalone` |
 | `RTBH_PORTAL_URL` | `localhost:50051` | Portal gRPC address |
+| `RTBH_GRPC_MAX_MSG_SIZE` | `0` (4MB default) | gRPC max message size in bytes |
 | `RTBH_AGENT_NAME` | *(hostname)* | Agent display name |
 | `RTBH_BIRD_VERSION` | *(auto-detect)* | BIRD version (2/3) |
 | `RTBH_BIRD_OUTPUT` | `./data/rtbh_auto.conf` | Routes output file |
