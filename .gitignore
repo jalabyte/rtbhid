@@ -6,3 +6,4 @@ rtbhd
 /portal
 /data/*.db
 .DS_Store
+.sisyphus/
