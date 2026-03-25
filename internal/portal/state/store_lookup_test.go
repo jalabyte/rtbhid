@@ -383,3 +383,75 @@ func TestLookupIP_ExcludeListPreventsMatch(t *testing.T) {
 		t.Errorf("expected 0 matches for excluded prefix, got %d", len(results[0].Matches))
 	}
 }
+
+func TestLookupIP_SubPrefixLookup(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	// Create a source with specific child prefixes
+	createTestSource(t, store, "subprefix", []string{
+		"1.0.171.0/24",
+		"10.0.0.0/8",
+		"192.168.1.0/24",
+	})
+
+	// Test: Query with parent CIDR should find all child prefixes within it
+	results, err := store.LookupIP([]string{"1.0.171.0/24"})
+	if err != nil {
+		t.Fatalf("LookupIP failed: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	// Should find the matching prefix
+	if len(results[0].Matches) != 1 {
+		t.Fatalf("expected 1 match for 1.0.171.0/24, got %d: %v", len(results[0].Matches), results[0].Matches)
+	}
+
+	if results[0].Matches[0].CIDR != "1.0.171.0/24" {
+		t.Errorf("expected CIDR '1.0.171.0/24', got '%s'", results[0].Matches[0].CIDR)
+	}
+
+	// Test: Query with non-matching parent CIDR should not find unrelated prefixes
+	results2, err := store.LookupIP([]string{"2.0.0.0/8"})
+	if err != nil {
+		t.Fatalf("LookupIP failed: %v", err)
+	}
+
+	if len(results2[0].Matches) != 0 {
+		t.Errorf("expected 0 matches for non-overlapping CIDR, got %d", len(results2[0].Matches))
+	}
+}
+
+func TestLookupIP_MixedQueryTypes(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	// Create a source with prefixes
+	createTestSource(t, store, "mixedquery", []string{
+		"1.0.171.0/24",
+		"10.0.0.0/8",
+	})
+
+	// Test: IP query should find containing prefix
+	results, err := store.LookupIP([]string{"1.0.171.49"})
+	if err != nil {
+		t.Fatalf("LookupIP failed: %v", err)
+	}
+
+	if len(results[0].Matches) != 1 || results[0].Matches[0].CIDR != "1.0.171.0/24" {
+		t.Errorf("expected match for 1.0.171.0/24 when querying 1.0.171.49, got %v", results[0].Matches)
+	}
+
+	// Test: CIDR query should find sub-prefixes
+	results2, err := store.LookupIP([]string{"1.0.0.0/16"})
+	if err != nil {
+		t.Fatalf("LookupIP failed: %v", err)
+	}
+
+	if len(results2[0].Matches) != 1 || results2[0].Matches[0].CIDR != "1.0.171.0/24" {
+		t.Errorf("expected match for 1.0.171.0/24 when querying 1.0.0.0/16, got %v", results2[0].Matches)
+	}
+}

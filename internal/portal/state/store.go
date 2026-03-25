@@ -597,13 +597,19 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 	results := make([]LookupResult, 0, len(queries))
 
 	for _, query := range queries {
+		// Detect CIDR format before normalization (normalizeCIDR converts bare IPs to /32)
+		isQueryCIDR := strings.Contains(query, "/")
+
 		normalized, err := normalizeCIDR(query)
 		if err != nil {
 			return nil, fmt.Errorf("invalid query '%s': %w", query, err)
 		}
 
 		var queryAddr netip.Addr
+		var queryPrefix netip.Prefix
+
 		if p, err := netip.ParsePrefix(normalized); err == nil {
+			queryPrefix = p
 			queryAddr = p.Addr()
 		} else if addr, err := netip.ParseAddr(normalized); err == nil {
 			queryAddr = addr
@@ -632,8 +638,18 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 			if err := sourceRows.Scan(&sourceID, &sourceName, &cidr, &createdAt); err != nil {
 				continue
 			}
-			if prefix, err := netip.ParsePrefix(cidr); err == nil {
-				if prefix.Contains(queryAddr) {
+			if storedPrefix, err := netip.ParsePrefix(cidr); err == nil {
+				var matched bool
+				if isQueryCIDR {
+					// Query is CIDR: check if stored prefix is a sub-prefix of query prefix
+					// i.e., query prefix contains stored prefix's network
+					matched = queryPrefix.Bits() <= storedPrefix.Bits() &&
+						queryPrefix.Contains(storedPrefix.Addr())
+				} else {
+					// Query is bare IP: check if stored prefix contains the IP
+					matched = storedPrefix.Contains(queryAddr)
+				}
+				if matched {
 					matches = append(matches, LookupMatch{
 						Type:       "source",
 						SourceID:   sourceID,
@@ -659,8 +675,17 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 			if err := prefixRows.Scan(&cidr, &note, &createdAt); err != nil {
 				continue
 			}
-			if prefix, err := netip.ParsePrefix(cidr); err == nil {
-				if prefix.Contains(queryAddr) {
+			if storedPrefix, err := netip.ParsePrefix(cidr); err == nil {
+				var matched bool
+				if isQueryCIDR {
+					// Query is CIDR: check if stored prefix is a sub-prefix of query prefix
+					matched = queryPrefix.Bits() <= storedPrefix.Bits() &&
+						queryPrefix.Contains(storedPrefix.Addr())
+				} else {
+					// Query is bare IP: check if stored prefix contains the IP
+					matched = storedPrefix.Contains(queryAddr)
+				}
+				if matched {
 					matches = append(matches, LookupMatch{
 						Type:      "manual",
 						CIDR:      cidr,
