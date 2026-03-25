@@ -17,15 +17,17 @@ import (
 type Server struct {
 	pb.UnimplementedPortalServer
 
-	svc  *portal.Service
-	addr string
+	svc            *portal.Service
+	addr           string
+	maxSendMsgSize int
 }
 
 // NewServer creates a new gRPC portal server.
-func NewServer(svc *portal.Service, addr string) *Server {
+func NewServer(svc *portal.Service, addr string, maxSendMsgSize int) *Server {
 	return &Server{
-		svc:  svc,
-		addr: addr,
+		svc:            svc,
+		addr:           addr,
+		maxSendMsgSize: maxSendMsgSize,
 	}
 }
 
@@ -37,10 +39,14 @@ func (s *Server) ListenAndServe() error {
 		return fmt.Errorf("grpcapi: listen %s: %w", s.addr, err)
 	}
 
-	gs := grpc.NewServer()
+	var opts []grpc.ServerOption
+	if s.maxSendMsgSize > 0 {
+		opts = append(opts, grpc.MaxSendMsgSize(s.maxSendMsgSize))
+	}
+	gs := grpc.NewServer(opts...)
 	pb.RegisterPortalServer(gs, s)
 
-	log.Printf("gRPC server listening on %s", s.addr)
+	log.Printf("gRPC server listening on %s (max send msg: %d bytes)", s.addr, s.maxSendMsgSize)
 	return gs.Serve(lis)
 }
 

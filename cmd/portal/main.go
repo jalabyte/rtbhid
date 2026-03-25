@@ -28,6 +28,7 @@ func main() {
 	dbPath := getEnv("RTBH_DB_PATH", "./data/portal.db")
 	localASN := getEnvInt("RTBH_LOCAL_ASN", 65500)
 	tickSec := getEnvInt("RTBH_SCHEDULER_TICK_SECONDS", 15)
+	grpcMaxMsgSize := getEnvInt("RTBH_GRPC_MAX_MSG_SIZE", 0)
 
 	authCfg := httpapi.AuthConfig{
 		Enabled:       os.Getenv("RTBH_AUTH_USER") != "",
@@ -53,7 +54,7 @@ func main() {
 	svc.Start(ctx)
 
 	// gRPC server
-	grpcServer := grpcapi.NewServer(svc, grpcAddr)
+	grpcServer := grpcapi.NewServer(svc, grpcAddr, grpcMaxMsgSize)
 	go func() {
 		if err := grpcServer.ListenAndServe(); err != nil {
 			log.Fatalf("grpc server: %v", err)
@@ -84,6 +85,7 @@ func main() {
 
 	fmt.Printf("portal HTTP listening on %s\n", listenAddr)
 	fmt.Printf("portal gRPC listening on %s\n", grpcAddr)
+	fmt.Printf("portal gRPC max msg size: %d bytes\n", grpcMaxMsgSize)
 	fmt.Printf("database: %s\n", dbPath)
 	fmt.Printf("local ASN: %d\n", localASN)
 
