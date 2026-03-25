@@ -1,0 +1,25 @@
+{
+  "active_plan": "/Users/billyriantono/Works/rtbhid/.sisyphus/plans/ip-lookup-page.md",
+  "started_at": "2026-03-25T12:36:50.627Z",
+  "session_ids": [
+    "ses_2dbbe6ad1ffed0z9lkb73lX3Xi",
+    "ses_2daff95c0ffeD21EC6LTzWH6a3",
+    "ses_2daffae96ffeBPuxr7E94csI7v",
+    "ses_2daffbfe1ffeRW7mpiFKLgvk6m",
+    "ses_2daffceadffeAfaa7U1dS9eg5n",
+    "ses_2daffa0c0ffeJpNWf249PcJ4yL"
+  ],
+  "plan_name": "ip-lookup-page",
+  "agent": "atlas",
+  "task_sessions": {
+    "todo:1": {
+      "task_key": "todo:1",
+      "task_label": "1",
+      "task_title": "Setup vitest for frontend testing",
+      "session_id": "ses_2daffceadffeAfaa7U1dS9eg5n",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-03-25T12:39:44.592Z"
+    }
+  }
+}

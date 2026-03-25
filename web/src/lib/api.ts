@@ -91,6 +91,24 @@ export interface Status {
   local_asn: number;
 }
 
+export interface LookupMatch {
+  type: string;
+  source_id: string;
+  source_name: string;
+  cidr: string;
+  note: string;
+  created_at: string;
+}
+
+export interface LookupResult {
+  query: string;
+  matches: LookupMatch[];
+}
+
+export interface LookupResponse {
+  results: LookupResult[];
+}
+
 export const api = {
   getStatus: () => fetchJSON<Status>("/status"),
 

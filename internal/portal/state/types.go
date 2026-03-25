@@ -60,3 +60,21 @@ type Event struct {
 	AgentID   string    `json:"agent_id"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type LookupMatch struct {
+	Type       string    `json:"type"`
+	SourceID   string    `json:"source_id"`
+	SourceName string    `json:"source_name"`
+	CIDR       string    `json:"cidr"`
+	Note       string    `json:"note"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type LookupResult struct {
+	Query   string        `json:"query"`
+	Matches []LookupMatch `json:"matches"`
+}
+
+type LookupResponse struct {
+	Results []LookupResult `json:"results"`
+}
