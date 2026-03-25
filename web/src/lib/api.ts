@@ -206,6 +206,7 @@ export const api = {
     asn: string;
     ipv4?: boolean;
     ipv6?: boolean;
+    sources?: string[];
   }) => postJSON<PrefixBuilderResponse>("/prefix-builder", data),
   bulkAddPrefixes: (data: { items: string[]; note: string }) =>
     postJSON<BulkAddResponse>("/prefixes/bulk", data),

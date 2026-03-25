@@ -932,9 +932,10 @@ func (s *Server) handlePrefixBuilder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ASN  string `json:"asn"`
-		IPv4 *bool  `json:"ipv4"`
-		IPv6 *bool  `json:"ipv6"`
+		ASN     string   `json:"asn"`
+		IPv4    *bool    `json:"ipv4"`
+		IPv6    *bool    `json:"ipv6"`
+		Sources []string `json:"sources"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -953,10 +954,10 @@ func (s *Server) handlePrefixBuilder(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	prefixes, err := s.svc.BuildPrefixesFromASN(ctx, req.ASN, ipv4, ipv6)
+	prefixes, err := s.svc.BuildPrefixesFromASNWithSources(ctx, req.ASN, ipv4, ipv6, req.Sources)
 	if err != nil {
 		status := http.StatusInternalServerError
-		if errors.Is(err, portal.ErrInvalidASN) || errors.Is(err, portal.ErrNoAddressFamily) {
+		if errors.Is(err, portal.ErrInvalidASN) || errors.Is(err, portal.ErrNoAddressFamily) || errors.Is(err, portal.ErrInvalidSource) {
 			status = http.StatusBadRequest
 		}
 		writeError(w, status, err)

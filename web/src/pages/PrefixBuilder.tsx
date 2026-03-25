@@ -7,10 +7,23 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Plus, RefreshCw, ShieldOff } from "lucide-react";
 
+const IRR_SOURCES = [
+  "RADB",
+  "RIPE",
+  "ARIN",
+  "APNIC",
+  "AFRINIC",
+  "LACNIC",
+  "NTTCOM",
+  "ALTDB",
+  "BELL",
+];
+
 export default function PrefixBuilder() {
   const [asn, setAsn] = useState("");
   const [ipv4, setIpv4] = useState(true);
   const [ipv6, setIpv6] = useState(true);
+  const [selectedSources, setSelectedSources] = useState<string[]>(IRR_SOURCES);
   const [note, setNote] = useState("");
   const [prefixes, setPrefixes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -36,6 +49,11 @@ export default function PrefixBuilder() {
       setError("Select IPv4 and/or IPv6");
       return;
     }
+    if (selectedSources.length === 0) {
+      setPrefixes([]);
+      setError("Select at least one IRR source");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -43,6 +61,7 @@ export default function PrefixBuilder() {
         asn: trimmed,
         ipv4,
         ipv6,
+        sources: selectedSources,
       });
       setPrefixes(result.prefixes);
     } catch (err) {
@@ -119,6 +138,31 @@ export default function PrefixBuilder() {
             <RefreshCw className="h-4 w-4 mr-2" />
             {loading ? "Building..." : "Build"}
           </Button>
+        </div>
+
+        <div className="space-y-2">
+          <Label>IRR Sources</Label>
+          <div className="flex flex-wrap gap-3">
+            {IRR_SOURCES.map((source) => (
+              <label key={source} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={selectedSources.includes(source)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedSources((prev) => [...prev, source]);
+                    } else {
+                      setSelectedSources((prev) =>
+                        prev.filter((item) => item !== source),
+                      );
+                    }
+                  }}
+                  className="h-4 w-4"
+                />
+                {source}
+              </label>
+            ))}
+          </div>
         </div>
 
         <div className="space-y-2">

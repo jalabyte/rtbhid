@@ -16,6 +16,7 @@ import (
 var (
 	ErrInvalidASN      = errors.New("invalid asn")
 	ErrNoAddressFamily = errors.New("at least one of ipv4/ipv6 must be true")
+	ErrInvalidSource   = errors.New("invalid irr source")
 	defaultBGPQTimeout = 30 * time.Second
 )
 
@@ -24,11 +25,20 @@ type bgpqPrefix struct {
 }
 
 func (s *Service) BuildPrefixesFromASN(ctx context.Context, asn string, ipv4, ipv6 bool) ([]string, error) {
+	return s.BuildPrefixesFromASNWithSources(ctx, asn, ipv4, ipv6, nil)
+}
+
+func (s *Service) BuildPrefixesFromASNWithSources(ctx context.Context, asn string, ipv4, ipv6 bool, sources []string) ([]string, error) {
 	if !ipv4 && !ipv6 {
 		return nil, ErrNoAddressFamily
 	}
 
 	normalized, err := normalizeASN(asn)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceArg, err := normalizeSources(sources)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +49,7 @@ func (s *Service) BuildPrefixesFromASN(ctx context.Context, asn string, ipv4, ip
 	all := make([]string, 0)
 
 	if ipv4 {
-		v4, err := runBGPQ(ctx, normalized, "-4")
+		v4, err := runBGPQWithSources(ctx, normalized, "-4", sourceArg)
 		if err != nil {
 			return nil, err
 		}
@@ -47,7 +57,7 @@ func (s *Service) BuildPrefixesFromASN(ctx context.Context, asn string, ipv4, ip
 	}
 
 	if ipv6 {
-		v6, err := runBGPQ(ctx, normalized, "-6")
+		v6, err := runBGPQWithSources(ctx, normalized, "-6", sourceArg)
 		if err != nil {
 			return nil, err
 		}
@@ -72,9 +82,16 @@ func (s *Service) BuildPrefixesFromASN(ctx context.Context, asn string, ipv4, ip
 }
 
 func runBGPQ(ctx context.Context, asn string, familyFlag string) ([]string, error) {
+	return runBGPQWithSources(ctx, asn, familyFlag, "")
+}
+
+func runBGPQWithSources(ctx context.Context, asn string, familyFlag string, sources string) ([]string, error) {
 	args := []string{"-j"}
 	if familyFlag != "" {
 		args = append(args, familyFlag)
+	}
+	if sources != "" {
+		args = append(args, "-S", sources)
 	}
 	args = append(args, asn)
 
@@ -120,6 +137,46 @@ func normalizeASN(asn string) (string, error) {
 		return "", ErrInvalidASN
 	}
 	return "AS" + upper, nil
+}
+
+func normalizeSources(sources []string) (string, error) {
+	if len(sources) == 0 {
+		return "", nil
+	}
+
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(sources))
+	for _, src := range sources {
+		trimmed := strings.TrimSpace(src)
+		if trimmed == "" {
+			continue
+		}
+		upper := strings.ToUpper(trimmed)
+		if !isValidIRRSource(upper) {
+			return "", ErrInvalidSource
+		}
+		if _, ok := seen[upper]; ok {
+			continue
+		}
+		seen[upper] = struct{}{}
+		out = append(out, upper)
+	}
+
+	if len(out) == 0 {
+		return "", nil
+	}
+	sort.Strings(out)
+	return strings.Join(out, ","), nil
+}
+
+func isValidIRRSource(value string) bool {
+	for _, r := range value {
+		if unicode.IsDigit(r) || unicode.IsLetter(r) || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func isAllDigits(value string) bool {
