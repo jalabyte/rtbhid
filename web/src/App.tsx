@@ -5,7 +5,9 @@ import Agents from "./pages/Agents";
 import Prefixes from "./pages/Prefixes";
 import PrefixBuilder from "./pages/PrefixBuilder";
 import Sources from "./pages/Sources";
+import SourcePrefixes from "./pages/SourcePrefixes";
 import Excludes from "./pages/Excludes";
+import ExcludeSourcePrefixes from "./pages/ExcludeSourcePrefixes";
 import Peers from "./pages/Peers";
 import Events from "./pages/Events";
 import Docs from "./pages/Docs";
@@ -23,7 +25,9 @@ export default function App() {
             <Route path="/prefixes" element={<Prefixes />} />
             <Route path="/prefix-builder" element={<PrefixBuilder />} />
             <Route path="/sources" element={<Sources />} />
+            <Route path="/sources/:id/prefixes" element={<SourcePrefixes />} />
             <Route path="/excludes" element={<Excludes />} />
+            <Route path="/exclude-prefixes" element={<ExcludeSourcePrefixes />} />
             <Route path="/peers" element={<Peers />} />
             <Route path="/events" element={<Events />} />
             <Route path="/lookup" element={<Lookup />} />

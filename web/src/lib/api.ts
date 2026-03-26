@@ -124,6 +124,13 @@ export interface BulkAddResponse {
   invalid: number;
 }
 
+export interface ExcludeSourcePrefix {
+  source_id: string;
+  source_name: string;
+  cidr: string;
+  created_at: string;
+}
+
 export const api = {
   getStatus: () => fetchJSON<Status>("/status"),
 
@@ -179,6 +186,29 @@ export const api = {
     }),
   syncExcludeSource: (id: string) =>
     fetch(`${BASE}/exclude-sources/${id}/sync`, { method: "POST" }),
+  getExcludeSourcePrefixes: (offset = 0, limit = 100) =>
+    fetchJSON<{
+      items: ExcludeSourcePrefix[];
+      total: number;
+      offset: number;
+      limit: number;
+    }>(`/exclude-sources/prefixes?offset=${offset}&limit=${limit}`),
+
+  getSourcePrefixesByID: (id: string, page = 1, limit = 100) =>
+    fetchJSON<{
+      items: string[];
+      total: number;
+      page: number;
+      limit: number;
+    }>(`/sources/${id}/prefixes?page=${page}&limit=${limit}`),
+
+  getExcludeSourcePrefixesByID: (id: string, page = 1, limit = 100) =>
+    fetchJSON<{
+      items: string[];
+      total: number;
+      page: number;
+      limit: number;
+    }>(`/exclude-sources/${id}/prefixes?page=${page}&limit=${limit}`),
 
   getPeers: () => fetchJSON<{ items: Peer[] }>("/peers"),
   addPeer: (data: Omit<Peer, "id" | "created_at">) =>

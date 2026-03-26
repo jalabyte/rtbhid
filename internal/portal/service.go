@@ -413,6 +413,19 @@ func (s *Service) ListPrefixes() []state.Prefix       { return s.store.ListPrefi
 func (s *Service) ListSources() []state.Source        { return s.store.ListSources() }
 func (s *Service) ListExcludes() []state.Exclude      { return s.store.ListExcludes() }
 func (s *Service) ListExcludeSources() []state.Source { return s.store.ListExcludeSources() }
+func (s *Service) ListExcludeSourcePrefixes(offset, limit int) ([]state.ExcludeSourcePrefixItem, int, error) {
+	return s.store.ListExcludeSourcePrefixes(offset, limit)
+}
+
+// GetSourcePrefixes returns paginated prefixes for a specific source
+func (s *Service) GetSourcePrefixes(sourceID string, page, limit int) ([]string, int, error) {
+	return s.store.GetSourcePrefixes(sourceID, page, limit)
+}
+
+// GetExcludeSourcePrefixes returns paginated prefixes for a specific exclude source
+func (s *Service) GetExcludeSourcePrefixes(sourceID string, page, limit int) ([]string, int, error) {
+	return s.store.GetExcludeSourcePrefixes(sourceID, page, limit)
+}
 func (s *Service) ListPeers() []state.Peer            { return s.store.ListPeers() }
 func (s *Service) ListEvents(limit int) []state.Event { return s.store.ListEvents(limit) }
 func (s *Service) GetEffectivePrefixCount() int       { return len(s.store.EffectivePrefixes()) }

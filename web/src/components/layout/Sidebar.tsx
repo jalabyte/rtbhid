@@ -22,6 +22,7 @@ const navItems = [
   { to: "/prefix-builder", icon: List, label: "Prefix Builder" },
   { to: "/sources", icon: Globe, label: "Sources" },
   { to: "/excludes", icon: ShieldOff, label: "Excludes" },
+  { to: "/exclude-prefixes", icon: ShieldOff, label: "Remote Excludes" },
   { to: "/peers", icon: Network, label: "Peers" },
   { to: "/events", icon: ScrollText, label: "Events" },
   { to: "/lookup", icon: Search, label: "Lookup" },

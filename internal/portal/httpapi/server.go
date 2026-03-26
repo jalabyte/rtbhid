@@ -72,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Exclude Sources
 	mux.HandleFunc("/api/v1/exclude-sources", s.handleExcludeSources)
+	mux.HandleFunc("/api/v1/exclude-sources/prefixes", s.handleExcludeSourcePrefixes)
 	mux.HandleFunc("/api/v1/exclude-sources/", s.handleExcludeSourceByID)
 
 	// Peers
@@ -390,6 +391,27 @@ func (s *Server) handleSourceByID(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 
+	// GET /api/v1/sources/:id/prefixes?page=1&limit=100
+	if len(parts) == 2 && parts[1] == "prefixes" {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		page, limit := parsePagination(r)
+		prefixes, total, err := s.svc.GetSourcePrefixes(id, page, limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items": prefixes,
+			"total": total,
+			"page":  page,
+			"limit": limit,
+		})
+		return
+	}
+
 	// POST /api/v1/sources/:id/sync
 	if len(parts) == 2 && parts[1] == "sync" {
 		if r.Method != http.MethodPost {
@@ -542,6 +564,42 @@ func (s *Server) handleExcludeSources(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleExcludeSourcePrefixes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+
+	offset := 0
+	limit := 100
+
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+
+	items, total, err := s.svc.ListExcludeSourcePrefixes(offset, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":  items,
+		"total":  total,
+		"offset": offset,
+		"limit":  limit,
+	})
+}
+
 func (s *Server) handleExcludeSourceByID(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/exclude-sources/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
@@ -549,6 +607,27 @@ func (s *Server) handleExcludeSourceByID(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	id := parts[0]
+
+	// GET /api/v1/exclude-sources/:id/prefixes?page=1&limit=100
+	if len(parts) == 2 && parts[1] == "prefixes" {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		page, limit := parsePagination(r)
+		prefixes, total, err := s.svc.GetExcludeSourcePrefixes(id, page, limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items": prefixes,
+			"total": total,
+			"page":  page,
+			"limit": limit,
+		})
+		return
+	}
 
 	// PUT /api/v1/exclude-sources/:id/toggle
 	if len(parts) == 2 && parts[1] == "toggle" {
@@ -886,6 +965,22 @@ func withLogging(next http.Handler) http.Handler {
 		fmt.Printf("%s %s\n", r.Method, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func parsePagination(r *http.Request) (page int, limit int) {
+	page = 1
+	limit = 100
+	if raw := r.URL.Query().Get("page"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			page = n
+		}
+	}
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 10000 {
+			limit = n
+		}
+	}
+	return page, limit
 }
 
 // ---------------------------------------------------------------------------

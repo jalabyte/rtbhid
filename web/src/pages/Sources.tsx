@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { api, type Source } from "@/lib/api";
 import {
   Table,
@@ -11,11 +12,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Trash2, Plus, RefreshCw, Power } from "lucide-react";
+import { Trash2, Plus, RefreshCw, Power, List } from "lucide-react";
 
 export default function Sources() {
+  const navigate = useNavigate();
   const [sources, setSources] = useState<Source[]>([]);
-  const [form, setForm] = useState({ name: "", url: "", interval: "300" });
+  const [form, setForm] = useState({ name: "", url: "", interval: "300 " });
 
   const load = () =>
     api
@@ -110,6 +112,14 @@ export default function Sources() {
               </TableCell>
               <TableCell>{s.last_count}</TableCell>
               <TableCell className="flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => navigate(`/sources/${s.id}/prefixes`)}
+                  title="View Prefixes"
+                >
+                  <List className="h-4 w-4" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

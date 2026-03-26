@@ -308,6 +308,125 @@ func (s *Store) SetSourceSyncResult(id string, count int) error {
 	return err
 }
 
+// GetSourcePrefixes retrieves paginated prefixes for a specific source.
+// Returns prefixes, total count, and error.
+func (s *Store) GetSourcePrefixes(sourceID string, page int, limit int) ([]string, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 10000 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	// Get total count
+	var total int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM source_prefixes WHERE source_id = ?`, sourceID).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Get paginated prefixes
+	rows, err := s.db.Query(`SELECT cidr FROM source_prefixes WHERE source_id = ? ORDER BY cidr LIMIT ? OFFSET ?`, sourceID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var prefixes []string
+	for rows.Next() {
+		var cidr string
+		if err := rows.Scan(&cidr); err != nil {
+			continue
+		}
+		prefixes = append(prefixes, cidr)
+	}
+	return prefixes, total, nil
+}
+
+// GetExcludeSourcePrefixes retrieves paginated prefixes for a specific exclude source.
+// Returns prefixes, total count, and error.
+func (s *Store) GetExcludeSourcePrefixes(sourceID string, page int, limit int) ([]string, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 10000 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	// Get total count
+	var total int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM exclude_source_prefixes WHERE source_id = ?`, sourceID).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Get paginated prefixes
+	rows, err := s.db.Query(`SELECT cidr FROM exclude_source_prefixes WHERE source_id = ? ORDER BY cidr LIMIT ? OFFSET ?`, sourceID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var prefixes []string
+	for rows.Next() {
+		var cidr string
+		if err := rows.Scan(&cidr); err != nil {
+			continue
+		}
+		prefixes = append(prefixes, cidr)
+	}
+	return prefixes, total, nil
+}
+
+// ExcludeSourcePrefixItem represents a single exclude source prefix with source info
+type ExcludeSourcePrefixItem struct {
+	SourceID   string    `json:"source_id"`
+	SourceName string    `json:"source_name"`
+	CIDR       string    `json:"cidr"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// ListExcludeSourcePrefixes returns paginated prefixes from exclude_source_prefixes with source info
+func (s *Store) ListExcludeSourcePrefixes(offset, limit int) ([]ExcludeSourcePrefixItem, int, error) {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit < 1 || limit > 10000 {
+		limit = 100
+	}
+
+	// Get total count
+	var total int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM exclude_source_prefixes`).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Get paginated prefixes with source info
+	rows, err := s.db.Query(`
+		SELECT es.id, es.name, esp.cidr, es.created_at
+		FROM exclude_source_prefixes esp
+		INNER JOIN exclude_sources es ON es.id = esp.source_id
+		ORDER BY es.created_at DESC
+		LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var items []ExcludeSourcePrefixItem
+	for rows.Next() {
+		var item ExcludeSourcePrefixItem
+		if err := rows.Scan(&item.SourceID, &item.SourceName, &item.CIDR, &item.CreatedAt); err != nil {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, total, nil
+}
+
 // --------------------------------------------------------------------------
 // Exclude CRUD
 // --------------------------------------------------------------------------
