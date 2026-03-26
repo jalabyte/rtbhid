@@ -262,6 +262,10 @@ RTBH_LOCAL_ASN=65500
 # Scheduler
 RTBH_SCHEDULER_TICK_SECONDS=15
 
+# IP ASN Lookup (opsional)
+# Dapatkan token gratis di https://ipinfo.io/signup
+RTBH_IPINFO_TOKEN=your-ipinfo-token
+
 # Authentication (opsional)
 RTBH_AUTH_USER=admin
 RTBH_AUTH_PASS=your-secure-password
@@ -403,6 +407,7 @@ RTBH_BIRD_COMMAND='birdc -s /var/run/bird/bird.ctl configure' \
 | `RTBH_DB_PATH` | `./data/portal.db` | SQLite database path |
 | `RTBH_LOCAL_ASN` | `65500` | Local ASN untuk semua agent |
 | `RTBH_SCHEDULER_TICK_SECONDS` | `15` | Interval sync check |
+| `RTBH_IPINFO_TOKEN` | *(disabled)* | ipinfo.io token untuk ASN lookup |
 | `RTBH_AUTH_USER` | *(disabled)* | Auth username |
 | `RTBH_AUTH_PASS` | *(disabled)* | Auth password |
 | `RTBH_AUTH_SESSION_SECRET` | *(random)* | Session signing key |

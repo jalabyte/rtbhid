@@ -129,6 +129,7 @@ export default function Lookup() {
                 <TableHead>Type</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>CIDR</TableHead>
+                <TableHead>ASN</TableHead>
                 <TableHead>Note</TableHead>
                 <TableHead>Date</TableHead>
               </TableRow>
@@ -154,23 +155,38 @@ export default function Lookup() {
                             </Badge>
                           </TableCell>
                           <TableCell>{match.source_name}</TableCell>
-                          <TableCell className="font-mono" data-cidr>
-                            {match.cidr === result.query ? "matched" : match.cidr}
-                          </TableCell>
-                          <TableCell>{match.note || "—"}</TableCell>
-                          <TableCell>{new Date(match.created_at).toLocaleString()}</TableCell>
-                        </TableRow>
-                      ))
-                    : results.length > 1
-                      ? [
-                          <TableRow key={result.query}>
-                            <TableCell className="font-medium">{result.query}</TableCell>
-                            <TableCell>—</TableCell>
-                            <TableCell>—</TableCell>
-                            <TableCell>—</TableCell>
-                            <TableCell>—</TableCell>
-                          </TableRow>,
-                        ]
+                           <TableCell className="font-mono" data-cidr>
+                             {match.cidr === result.query ? "matched" : match.cidr}
+                           </TableCell>
+                           <TableCell>
+                             {match.asn ? (
+                               <div className="space-y-0.5">
+                                 <div className="font-medium">{match.asn}</div>
+                                 {match.as_name && (
+                                   <div className="text-xs text-muted-foreground truncate max-w-[150px]">
+                                     {match.as_name}
+                                   </div>
+                                 )}
+                               </div>
+                             ) : (
+                               "—"
+                             )}
+                           </TableCell>
+                           <TableCell>{match.note || "—"}</TableCell>
+                           <TableCell>{new Date(match.created_at).toLocaleString()}</TableCell>
+                         </TableRow>
+                       ))
+                     : results.length > 1
+                       ? [
+                           <TableRow key={result.query}>
+                             <TableCell className="font-medium">{result.query}</TableCell>
+                             <TableCell>—</TableCell>
+                             <TableCell>—</TableCell>
+                             <TableCell>—</TableCell>
+                             <TableCell>—</TableCell>
+                             <TableCell>—</TableCell>
+                           </TableRow>,
+                         ]
                       : []
                 )
               )}

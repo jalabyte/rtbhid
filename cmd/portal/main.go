@@ -29,6 +29,7 @@ func main() {
 	localASN := getEnvInt("RTBH_LOCAL_ASN", 65500)
 	tickSec := getEnvInt("RTBH_SCHEDULER_TICK_SECONDS", 15)
 	grpcMaxMsgSize := getEnvInt("RTBH_GRPC_MAX_MSG_SIZE", 0)
+	ipinfoToken := getEnv("RTBH_IPINFO_TOKEN", "")
 
 	authCfg := httpapi.AuthConfig{
 		Enabled:       os.Getenv("RTBH_AUTH_USER") != "",
@@ -46,7 +47,7 @@ func main() {
 	defer store.Close()
 
 	fetcher := syncer.NewFetcher("rtbhid-portal/1.0")
-	svc := portal.NewService(store, fetcher, localASN, tickSec)
+	svc := portal.NewService(store, fetcher, localASN, tickSec, ipinfoToken)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -88,6 +89,11 @@ func main() {
 	fmt.Printf("portal gRPC max msg size: %d bytes\n", grpcMaxMsgSize)
 	fmt.Printf("database: %s\n", dbPath)
 	fmt.Printf("local ASN: %d\n", localASN)
+	if ipinfoToken != "" {
+		fmt.Printf("ipinfo.io ASN lookup: enabled\n")
+	} else {
+		fmt.Printf("ipinfo.io ASN lookup: disabled (set RTBH_IPINFO_TOKEN to enable)\n")
+	}
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, "server error: %v\n", err)

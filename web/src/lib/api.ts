@@ -98,6 +98,9 @@ export interface LookupMatch {
   cidr: string;
   note: string;
   created_at: string;
+  asn?: string;
+  as_name?: string;
+  as_domain?: string;
 }
 
 export interface LookupResult {

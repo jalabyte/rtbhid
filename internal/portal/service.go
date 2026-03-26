@@ -16,10 +16,11 @@ import (
 const heartbeatInterval = 15
 
 type Service struct {
-	store    *state.Store
-	fetcher  *syncer.Fetcher
-	localASN int
-	tickSec  int
+	store     *state.Store
+	fetcher   *syncer.Fetcher
+	localASN  int
+	tickSec   int
+	asnLookup *ASNLookup
 
 	// Agent config streams: agentID -> channel
 	mu      sync.RWMutex
@@ -27,13 +28,14 @@ type Service struct {
 	version int64
 }
 
-func NewService(store *state.Store, fetcher *syncer.Fetcher, localASN int, tickSec int) *Service {
+func NewService(store *state.Store, fetcher *syncer.Fetcher, localASN int, tickSec int, ipinfoToken string) *Service {
 	return &Service{
-		store:    store,
-		fetcher:  fetcher,
-		localASN: localASN,
-		tickSec:  tickSec,
-		streams:  make(map[string]chan *pb.ConfigUpdate),
+		store:     store,
+		fetcher:   fetcher,
+		localASN:  localASN,
+		tickSec:   tickSec,
+		asnLookup: NewASNLookup(ipinfoToken),
+		streams:   make(map[string]chan *pb.ConfigUpdate),
 	}
 }
 
@@ -415,6 +417,32 @@ func (s *Service) ListPeers() []state.Peer            { return s.store.ListPeers
 func (s *Service) ListEvents(limit int) []state.Event { return s.store.ListEvents(limit) }
 func (s *Service) GetEffectivePrefixCount() int       { return len(s.store.EffectivePrefixes()) }
 func (s *Service) GetLocalASN() int                   { return s.localASN }
+func (s *Service) ASNLookup() *ASNLookup              { return s.asnLookup }
+
+func (s *Service) LookupIPWithASN(ctx context.Context, queries []string) ([]state.LookupResult, error) {
+	results, err := s.store.LookupIP(queries)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.asnLookup == nil || !s.asnLookup.IsEnabled() {
+		return results, nil
+	}
+
+	for i := range results {
+		for j := range results[i].Matches {
+			match := &results[i].Matches[j]
+			asnInfo, err := s.asnLookup.LookupCIDR(ctx, match.CIDR)
+			if err == nil && asnInfo != nil {
+				match.ASN = asnInfo.ASN
+				match.ASName = asnInfo.ASName
+				match.ASDomain = asnInfo.ASDomain
+			}
+		}
+	}
+
+	return results, nil
+}
 
 // ---------------------------------------------------------------------------
 // Source sync

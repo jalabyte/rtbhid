@@ -776,14 +776,31 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 		excludeSet := make(map[string]bool)
 		var excludeParsed []netip.Prefix
 
-		excludeRows, err := s.db.Query(`SELECT cidr FROM excludes`)
+		excludeRows, err := s.db.Query(`SELECT cidr, note, created_at FROM excludes`)
 		if err == nil {
 			for excludeRows.Next() {
-				var cidr string
-				if err := excludeRows.Scan(&cidr); err == nil {
+				var cidr, note string
+				var createdAt time.Time
+				if err := excludeRows.Scan(&cidr, &note, &createdAt); err == nil {
 					excludeSet[cidr] = true
 					if pref, err := netip.ParsePrefix(cidr); err == nil {
 						excludeParsed = append(excludeParsed, pref.Masked())
+
+						var matched bool
+						if isQueryCIDR {
+							matched = queryPrefix.Bits() <= pref.Bits() &&
+								queryPrefix.Contains(pref.Addr())
+						} else {
+							matched = pref.Contains(queryAddr)
+						}
+						if matched {
+							matches = append(matches, LookupMatch{
+								Type:      "exclude",
+								CIDR:      cidr,
+								Note:      note,
+								CreatedAt: createdAt,
+							})
+						}
 					}
 				}
 			}
@@ -791,16 +808,35 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 		}
 
 		excludeSourceRows, err := s.db.Query(`
-			SELECT esp.cidr FROM exclude_source_prefixes esp
+			SELECT esp.cidr, es.id, es.name, es.created_at
+			FROM exclude_source_prefixes esp
 			INNER JOIN exclude_sources es ON es.id = esp.source_id
 			WHERE es.enabled = 1`)
 		if err == nil {
 			for excludeSourceRows.Next() {
-				var cidr string
-				if err := excludeSourceRows.Scan(&cidr); err == nil {
+				var cidr, sourceID, sourceName string
+				var createdAt time.Time
+				if err := excludeSourceRows.Scan(&cidr, &sourceID, &sourceName, &createdAt); err == nil {
 					excludeSet[cidr] = true
 					if pref, err := netip.ParsePrefix(cidr); err == nil {
 						excludeParsed = append(excludeParsed, pref.Masked())
+
+						var matched bool
+						if isQueryCIDR {
+							matched = queryPrefix.Bits() <= pref.Bits() &&
+								queryPrefix.Contains(pref.Addr())
+						} else {
+							matched = pref.Contains(queryAddr)
+						}
+						if matched {
+							matches = append(matches, LookupMatch{
+								Type:       "exclude",
+								SourceID:   sourceID,
+								SourceName: sourceName,
+								CIDR:       cidr,
+								CreatedAt:  createdAt,
+							})
+						}
 					}
 				}
 			}
@@ -809,6 +845,10 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 
 		filteredMatches := make([]LookupMatch, 0, len(matches))
 		for _, match := range matches {
+			if match.Type == "exclude" {
+				filteredMatches = append(filteredMatches, match)
+				continue
+			}
 			if excludeSet[match.CIDR] {
 				continue
 			}

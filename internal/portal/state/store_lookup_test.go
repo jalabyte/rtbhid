@@ -369,7 +369,6 @@ func TestLookupIP_ExcludeListPreventsMatch(t *testing.T) {
 		t.Fatalf("failed to create exclude: %v", err)
 	}
 
-	// Test: IP in excluded prefix should not match
 	results, err := store.LookupIP([]string{"192.168.1.1"})
 	if err != nil {
 		t.Fatalf("LookupIP failed: %v", err)
@@ -379,8 +378,16 @@ func TestLookupIP_ExcludeListPreventsMatch(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 
-	if len(results[0].Matches) != 0 {
-		t.Errorf("expected 0 matches for excluded prefix, got %d", len(results[0].Matches))
+	if len(results[0].Matches) != 1 {
+		t.Fatalf("expected 1 match (the exclude), got %d", len(results[0].Matches))
+	}
+
+	if results[0].Matches[0].Type != "exclude" {
+		t.Errorf("expected type 'exclude', got '%s'", results[0].Matches[0].Type)
+	}
+
+	if results[0].Matches[0].CIDR != "192.168.1.0/24" {
+		t.Errorf("expected CIDR '192.168.1.0/24', got '%s'", results[0].Matches[0].CIDR)
 	}
 }
 
@@ -453,5 +460,57 @@ func TestLookupIP_MixedQueryTypes(t *testing.T) {
 
 	if len(results2[0].Matches) != 1 || results2[0].Matches[0].CIDR != "1.0.171.0/24" {
 		t.Errorf("expected match for 1.0.171.0/24 when querying 1.0.0.0/16, got %v", results2[0].Matches)
+	}
+}
+
+func TestLookupIP_ExcludeOnly(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ex := Exclude{
+		CIDR:      "38.191.91.0/24",
+		Note:      "test exclude",
+		CreatedAt: time.Now().UTC(),
+	}
+	if _, err := store.CreateExclude(ex); err != nil {
+		t.Fatalf("failed to create exclude: %v", err)
+	}
+
+	results, err := store.LookupIP([]string{"38.191.91.1"})
+	if err != nil {
+		t.Fatalf("LookupIP failed: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	if len(results[0].Matches) != 1 {
+		t.Fatalf("expected 1 match for IP in exclusion list, got %d", len(results[0].Matches))
+	}
+
+	if results[0].Matches[0].Type != "exclude" {
+		t.Errorf("expected type 'exclude', got '%s'", results[0].Matches[0].Type)
+	}
+
+	if results[0].Matches[0].CIDR != "38.191.91.0/24" {
+		t.Errorf("expected CIDR '38.191.91.0/24', got '%s'", results[0].Matches[0].CIDR)
+	}
+
+	results2, err := store.LookupIP([]string{"38.191.91.0/24"})
+	if err != nil {
+		t.Fatalf("LookupIP failed: %v", err)
+	}
+
+	if len(results2[0].Matches) != 1 {
+		t.Fatalf("expected 1 match for CIDR in exclusion list, got %d", len(results2[0].Matches))
+	}
+
+	if results2[0].Matches[0].Type != "exclude" {
+		t.Errorf("expected type 'exclude', got '%s'", results2[0].Matches[0].Type)
+	}
+
+	if results2[0].Matches[0].CIDR != "38.191.91.0/24" {
+		t.Errorf("expected CIDR '38.191.91.0/24', got '%s'", results2[0].Matches[0].CIDR)
 	}
 }

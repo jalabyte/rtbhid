@@ -916,7 +916,7 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := s.svc.Store().LookupIP(req.Queries)
+	results, err := s.svc.LookupIPWithASN(r.Context(), req.Queries)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

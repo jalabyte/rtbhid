@@ -68,6 +68,9 @@ type LookupMatch struct {
 	CIDR       string    `json:"cidr"`
 	Note       string    `json:"note"`
 	CreatedAt  time.Time `json:"created_at"`
+	ASN        string    `json:"asn,omitempty"`
+	ASName     string    `json:"as_name,omitempty"`
+	ASDomain   string    `json:"as_domain,omitempty"`
 }
 
 type LookupResult struct {

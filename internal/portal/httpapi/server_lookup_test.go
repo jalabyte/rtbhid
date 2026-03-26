@@ -22,7 +22,7 @@ func setupTestServer(t *testing.T) *Server {
 	}
 
 	fetcher := syncer.NewFetcher("rtbhid-test/1.0")
-	svc := portal.NewService(store, fetcher, 65500, 300)
+	svc := portal.NewService(store, fetcher, 65500, 300, "")
 
 	server, err := NewServer(svc, nil, AuthConfig{Enabled: false})
 	if err != nil {
