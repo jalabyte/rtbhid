@@ -23,6 +23,7 @@ type Service struct {
 	tickSec   int
 	asnLookup *ASNLookup
 	idASNs    *IDASNRegistry
+	asnNames  *ASNNameRegistry
 
 	// autoAccept controls whether agents accept inbound BGP sessions from
 	// whitelisted ASNs.
@@ -45,6 +46,7 @@ func NewService(store *state.Store, fetcher *syncer.Fetcher, localASN int, tickS
 		tickSec:    tickSec,
 		asnLookup:  NewASNLookup(ipinfoToken),
 		idASNs:     NewIDASNRegistry(""),
+		asnNames:   NewASNNameRegistry(""),
 		autoAccept: true,
 		strictID:   true,
 		streams:    make(map[string]chan *pb.ConfigUpdate),
@@ -75,6 +77,11 @@ func (s *Service) SetIDASNSourceURL(url string) {
 // built-in union of all five RIR delegation files.
 func (s *Service) SetIDASNSourceURLs(urls []string) {
 	s.idASNs = NewIDASNRegistryURLs(urls)
+}
+
+// SetASNNameSourceURL overrides the ASN holder-name dataset URL.
+func (s *Service) SetASNNameSourceURL(url string) {
+	s.asnNames = NewASNNameRegistry(url)
 }
 
 // SetStrictIDWhitelist controls whether manual whitelist additions must exist
@@ -403,10 +410,27 @@ func (s *Service) ToggleWhitelistASN(id string, enabled bool) error {
 // APNIC-sourced portion of the whitelist with all Indonesian ASNs. Manual
 // entries are preserved.
 func (s *Service) ImportIndonesianASNs(ctx context.Context) (created int, total int, err error) {
+	type nameResult struct {
+		names map[uint32]string
+		err   error
+	}
+	nameCh := make(chan nameResult, 1)
+	go func() {
+		names, nameErr := s.asnNames.Fetch(ctx)
+		nameCh <- nameResult{names: names, err: nameErr}
+	}()
+
 	asns, err := s.idASNs.Fetch(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
+
+	nameRes := <-nameCh
+	if nameRes.err != nil {
+		log.Printf("asn names unavailable: %v", nameRes.err)
+		_ = s.store.AddEvent("whitelist.import_warning", "ASN holder names unavailable: "+nameRes.err.Error(), "")
+	}
+
 	if err := s.store.ReplaceIDASNRegistry(asns); err != nil {
 		return 0, 0, fmt.Errorf("cache Indonesian ASN registry: %w", err)
 	}
@@ -416,6 +440,7 @@ func (s *Service) ImportIndonesianASNs(ctx context.Context) (created int, total 
 		entries = append(entries, state.WhitelistASN{
 			ID:        newResourceID("asn"),
 			ASN:       asn,
+			Name:      nameRes.names[asn],
 			Country:   "ID",
 			Source:    "rir",
 			Enabled:   true,

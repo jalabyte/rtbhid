@@ -35,6 +35,7 @@ func main() {
 	strictID := getEnvBool("RTBH_WHITELIST_STRICT_ID", true)
 	idASNURL := getEnv("RTBH_ID_ASN_SOURCE_URL", "")
 	idASNURLs := splitList(getEnv("RTBH_ID_ASN_SOURCE_URLS", ""))
+	asnNameURL := getEnv("RTBH_ASN_NAME_SOURCE_URL", "")
 	metricsToken := getEnv("RTBH_METRICS_TOKEN", "")
 
 	authCfg := httpapi.AuthConfig{
@@ -60,6 +61,9 @@ func main() {
 		svc.SetIDASNSourceURLs(idASNURLs)
 	} else if idASNURL != "" {
 		svc.SetIDASNSourceURL(idASNURL)
+	}
+	if asnNameURL != "" {
+		svc.SetASNNameSourceURL(asnNameURL)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

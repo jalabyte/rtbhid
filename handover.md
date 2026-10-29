@@ -139,6 +139,7 @@ npm run dev         # Vite dev server (proxies API to :8088)
 | `RTBH_WHITELIST_STRICT_ID` | `true` | Require manual ASN adds to exist in the RIR country-ID registry |
 | `RTBH_ID_ASN_SOURCE_URL` | all RIRs | Override one Indonesian ASN source URL |
 | `RTBH_ID_ASN_SOURCE_URLS` | all RIRs | Comma-separated source URL list |
+| `RTBH_ASN_NAME_SOURCE_URL` | bgp.tools CSV | ASN holder-name source (fallback: iptoasn, RIPE asn.txt) |
 | `RTBH_METRICS_TOKEN` | *(public)* | Optional bearer token for `/metrics` |
 | `RTBH_AUTH_USER` | *(disabled)* | Auth username (enables auth) |
 | `RTBH_AUTH_PASS` | *(disabled)* | Auth password |

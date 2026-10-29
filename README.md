@@ -415,6 +415,7 @@ RTBH_BIRD_COMMAND='birdc -s /var/run/bird/bird.ctl configure' \
 | `RTBH_WHITELIST_STRICT_ID` | `true` | Tolak manual add ASN yang tidak ada di registry country-ID RIR |
 | `RTBH_ID_ASN_SOURCE_URL` | semua RIR | Override satu URL sumber daftar ASN Indonesia |
 | `RTBH_ID_ASN_SOURCE_URLS` | semua RIR | Override daftar URL (dipisah koma) sumber ASN Indonesia |
+| `RTBH_ASN_NAME_SOURCE_URL` | bgp.tools CSV | Override sumber nama ASN (fallback: iptoasn, RIPE asn.txt) |
 | `RTBH_METRICS_TOKEN` | *(public)* | Wajibkan `Authorization: Bearer <token>` atau `?token=` untuk `/metrics` |
 | `RTBH_AUTH_USER` | *(disabled)* | Auth username |
 | `RTBH_AUTH_PASS` | *(disabled)* | Auth password |
@@ -464,6 +465,9 @@ dan menerima sesi BGP masuk dari ASN yang ada di whitelist portal.
   dari RIR di luar APNIC. Override dengan `RTBH_ID_ASN_SOURCE_URL` /
   `RTBH_ID_ASN_SOURCE_URLS` atau tombol **Import Indonesian ASNs** di halaman
   **ASN Whitelist**.
+- RIR delegation files do not contain ASN holder names, so imports enrich the
+  **Name** column from bgp.tools (`asns.csv`), falling back to iptoasn and
+  RIPE `asn.txt`. Override with `RTBH_ASN_NAME_SOURCE_URL`.
 - Dengan `RTBH_WHITELIST_STRICT_ID=true` (default), penambahan manual ditolak
   bila ASN tidak ada di cache registry country-ID RIR. Gunakan `allow_non_id`
   pada request API atau centang **Allow non-Indonesian ASN** di UI untuk
