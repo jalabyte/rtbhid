@@ -29,6 +29,7 @@ type session struct {
 	routerID uint32
 	as4      bool
 	ipv6     bool
+	ibgp     bool
 	hold     time.Duration
 
 	established   atomic.Bool
@@ -193,6 +194,7 @@ func (s *Server) runSession(sess *session) {
 	sess.remoteAS = remoteAS
 	sess.as4 = open.HasAS4
 	sess.ipv6 = open.IPv6Unicast && s.cfg.EnableIPv6
+	sess.ibgp = remoteAS == sess.localAS
 
 	// Validate against static configuration, if any.
 	if sess.static != nil {
@@ -432,7 +434,7 @@ func (s *session) syncRoutes() {
 	}
 	for i := 0; i < len(addV4); i += updateChunkV4 {
 		end := min(i+updateChunkV4, len(addV4))
-		if err := s.send(encodeUpdateV4(prefixesToV4(addV4[i:end]), bitsV4(addV4[i:end]), s.localAS, s.as4, nextHop4, comms, large)); err != nil {
+		if err := s.send(encodeUpdateV4(prefixesToV4(addV4[i:end]), bitsV4(addV4[i:end]), s.localAS, s.as4, nextHop4, comms, large, s.ibgp)); err != nil {
 			return
 		}
 	}
@@ -445,7 +447,7 @@ func (s *session) syncRoutes() {
 		}
 		for i := 0; i < len(addV6); i += updateChunkV6 {
 			end := min(i+updateChunkV6, len(addV6))
-			if err := s.send(encodeUpdateV6(prefixesToV6(addV6[i:end]), bitsV6(addV6[i:end]), s.localAS, s.as4, nextHop6.As16(), comms, large)); err != nil {
+			if err := s.send(encodeUpdateV6(prefixesToV6(addV6[i:end]), bitsV6(addV6[i:end]), s.localAS, s.as4, nextHop6.As16(), comms, large, s.ibgp)); err != nil {
 				return
 			}
 		}

@@ -135,9 +135,23 @@ type Server struct {
 }
 
 type peerRuntime struct {
-	cfg     PeerConfig
-	started bool
-	session atomic.Pointer[session]
+	cfg      PeerConfig
+	started  bool
+	stop     chan struct{}
+	stopOnce sync.Once
+	session  atomic.Pointer[session]
+}
+
+func newPeerRuntime(cfg PeerConfig) *peerRuntime {
+	return &peerRuntime{cfg: cfg, stop: make(chan struct{})}
+}
+
+func (p *peerRuntime) stopLoop() {
+	p.stopOnce.Do(func() {
+		if p.stop != nil {
+			close(p.stop)
+		}
+	})
 }
 
 // New creates a BGP server. It does not listen until Start is called.
@@ -427,30 +441,35 @@ func (s *Server) SetPeers(peers []PeerConfig) {
 		if p.LocalAS == 0 {
 			p.LocalAS = s.cfg.LocalASN
 		}
-		wanted[p.Neighbor] = &peerRuntime{cfg: p}
+		wanted[p.Neighbor] = newPeerRuntime(p)
 	}
 
 	s.mu.Lock()
 	previous := s.peers
-	s.peers = wanted
 	var toStart []*peerRuntime
 	var toStop []*peerRuntime
 	for key, p := range wanted {
 		old, ok := previous[key]
-		if !ok || !samePeer(old.cfg, p.cfg) {
-			toStart = append(toStart, p)
+		if ok && samePeer(old.cfg, p.cfg) {
+			// Keep the live runtime (and its goroutine) for unchanged peers.
+			wanted[key] = old
+			continue
 		}
+		if ok {
+			toStop = append(toStop, old)
+		}
+		toStart = append(toStart, p)
 	}
 	for key, old := range previous {
 		if _, ok := wanted[key]; !ok {
 			toStop = append(toStop, old)
-		} else if !samePeer(old.cfg, wanted[key].cfg) {
-			toStop = append(toStop, old)
 		}
 	}
+	s.peers = wanted
 	s.mu.Unlock()
 
 	for _, p := range toStop {
+		p.stopLoop()
 		if sess := p.session.Load(); sess != nil {
 			sess.close(true)
 		}
@@ -494,19 +513,31 @@ func (s *Server) maintainPeer(p *peerRuntime) {
 		select {
 		case <-s.ctx.Done():
 			return
+		case <-p.stop:
+			return
 		default:
 		}
 
 		conn, err := s.dialPeer(p.cfg)
 		if err != nil {
 			s.log.Printf("bgpserver: dial %s (%s) failed: %v", p.cfg.Name, p.cfg.Neighbor, err)
-			if !s.sleep(backoff) {
+			if !s.sleepPeer(p, backoff) {
 				return
 			}
 			if backoff < 30*time.Second {
 				backoff *= 2
 			}
 			continue
+		}
+		// The peer may have been removed while the dial was in flight.
+		select {
+		case <-s.ctx.Done():
+			_ = conn.Close()
+			return
+		case <-p.stop:
+			_ = conn.Close()
+			return
+		default:
 		}
 		backoff = time.Second
 
@@ -515,7 +546,7 @@ func (s *Server) maintainPeer(p *peerRuntime) {
 		s.runSession(sess)
 		p.session.Store(nil)
 
-		if !s.sleep(3 * time.Second) {
+		if !s.sleepPeer(p, 3*time.Second) {
 			return
 		}
 	}
@@ -535,11 +566,13 @@ func (s *Server) dialPeer(p PeerConfig) (net.Conn, error) {
 	return conn, nil
 }
 
-func (s *Server) sleep(d time.Duration) bool {
+func (s *Server) sleepPeer(p *peerRuntime, d time.Duration) bool {
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
 	case <-s.ctx.Done():
+		return false
+	case <-p.stop:
 		return false
 	case <-t.C:
 		return true

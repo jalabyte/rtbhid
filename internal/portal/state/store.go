@@ -104,8 +104,22 @@ func (s *Store) GetAgent(id string) (Agent, bool) {
 }
 
 func (s *Store) DeleteAgent(id string) error {
-	_, err := s.db.Exec(`DELETE FROM agents WHERE id = ?`, id)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`DELETE FROM agent_bgp_sessions WHERE agent_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM agent_bgp_status WHERE agent_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM agents WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) MarkStaleAgents(timeout time.Duration) int {
@@ -792,14 +806,25 @@ func (s *Store) ToggleWhitelistASN(id string, enabled bool) error {
 // ReplaceWhitelistBySource removes entries from the given source and inserts
 // the supplied entries. Manual entries are never touched.
 func (s *Store) ReplaceWhitelistBySource(source string, entries []WhitelistASN) (int, error) {
+	return s.ReplaceWhitelistBySources([]string{source}, entries)
+}
+
+// ReplaceWhitelistBySources removes entries from any of the given source
+// buckets and inserts the supplied entries. Manual entries are never touched.
+func (s *Store) ReplaceWhitelistBySources(sources []string, entries []WhitelistASN) (int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.Exec(`DELETE FROM asn_whitelist WHERE source = ?`, source); err != nil {
-		return 0, err
+	for _, source := range sources {
+		if source == "" {
+			continue
+		}
+		if _, err := tx.Exec(`DELETE FROM asn_whitelist WHERE source = ?`, source); err != nil {
+			return 0, err
+		}
 	}
 	created := 0
 	for _, w := range entries {
@@ -809,8 +834,8 @@ func (s *Store) ReplaceWhitelistBySource(source string, entries []WhitelistASN) 
 		if w.Country == "" {
 			w.Country = "ID"
 		}
-		if w.Source == "" {
-			w.Source = source
+		if w.Source == "" && len(sources) > 0 {
+			w.Source = sources[0]
 		}
 		res, err := tx.Exec(`
 			INSERT OR IGNORE INTO asn_whitelist (id, asn, name, country, source, enabled, created_at)
@@ -834,6 +859,44 @@ func (s *Store) CountWhitelistASNs() int {
 	var n int
 	_ = s.db.QueryRow(`SELECT COUNT(*) FROM asn_whitelist`).Scan(&n)
 	return n
+}
+
+// --------------------------------------------------------------------------
+// Indonesian ASN registry cache (authoritative country-ID ASN set)
+// --------------------------------------------------------------------------
+
+func (s *Store) ReplaceIDASNRegistry(asns []uint32) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`DELETE FROM id_asn_registry`); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, asn := range asns {
+		if asn == 0 {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO id_asn_registry (asn, updated_at) VALUES (?, ?)`, asn, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CountIDASNRegistry() int {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM id_asn_registry`).Scan(&n)
+	return n
+}
+
+func (s *Store) IsIDASNRegistered(asn uint32) bool {
+	var found int
+	err := s.db.QueryRow(`SELECT 1 FROM id_asn_registry WHERE asn = ?`, asn).Scan(&found)
+	return err == nil
 }
 
 // --------------------------------------------------------------------------

@@ -52,7 +52,7 @@ rtbhid/
 │   ├── shared/types.go         # Shared types (mostly empty)
 │   └── syncer/syncer.go        # URL fetcher for prefix sources
 ├── gen/rtbhid/                  # Generated gRPC protobuf code
-├── internal/portal/id_asns.go  # APNIC Indonesian ASN registry importer
+├── internal/portal/id_asns.go  # Multi-RIR Indonesian ASN registry importer
 ├── proto/
 │   ├── rtbhid.proto            # gRPC service definition
 │   └── buf.yaml                # buf config
@@ -229,7 +229,7 @@ All under `/api/v1/` (except auth/login). Full list from `server.go`:
 | DELETE | `/whitelist/:id` | Remove an ASN whitelist entry |
 | PUT | `/whitelist/:id/toggle` | Enable/disable an entry |
 | PUT | `/whitelist/auto-accept` | Toggle agent auto-accept |
-| POST | `/whitelist/import` | Import Indonesian ASNs from APNIC |
+| POST | `/whitelist/import` | Import Indonesian ASNs from all RIRs |
 | GET | `/metrics` | Prometheus metrics (public, no auth) |
 | POST | `/register` | Agent registration |
 | POST | `/heartbeat` | Agent heartbeat |
@@ -324,7 +324,7 @@ Two service files in `deploy/systemd/`:
 ## Recent Changes (Completed)
 
 - **Embedded BGP server** — `internal/bgpserver` implements BGP-4 OPEN/KEEPALIVE/UPDATE, IPv4/IPv6 announcements, standard + large communities, AS4 capability, static peers, and inbound sessions auto-accepted by ASN. Selected with `RTBH_BGP_ENGINE=custom`.
-- **ASN whitelist** — Portal stores `asn_whitelist`, imports Indonesian ASN delegations from APNIC (`internal/portal/id_asns.go`), and pushes the enabled list to agents. New **ASN Whitelist** dashboard page.
+- **ASN whitelist** — Portal stores `asn_whitelist`, imports Indonesian ASN delegations from all five RIRs (`internal/portal/id_asns.go`), and pushes the enabled list to agents. New **ASN Whitelist** dashboard page.
 - **BGP observability** — Agents report live sessions in heartbeats every 15 seconds. Portal stores them in `agent_bgp_sessions`/`agent_bgp_status`, exposes `GET /api/v1/bgp` and Prometheus `GET /metrics`. New **BGP Monitor** page with live refresh, filters, stale detection, and per-agent engine info.
 - **Exclude sources** — Added remote URL-based exclude lists with sync scheduler, mirroring the existing source pattern. Tables: `exclude_sources`, `exclude_source_prefixes`.
 - **Portal auth** — Ported auth system from standalone to portal. Login page, session cookies, auth middleware.

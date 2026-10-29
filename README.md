@@ -33,7 +33,7 @@ RTBHID memiliki tiga mode operasi:
 - ✅ Exclude list untuk false-positive prevention
 - ✅ Manajemen BGP peer terpusat (single/bulk)
 - ✅ Embedded BGP server (opsional, pengganti BIRD) dengan auto-accept peer
-- ✅ ASN whitelist (default daftar ASN Indonesia dari APNIC, bisa tambah/hapus manual)
+- ✅ ASN whitelist (gabungan data delegasi APNIC/ARIN/RIPE/LACNIC/AFRINIC untuk country ID, bisa tambah/hapus manual)
 - ✅ Monitoring sesi BGP real-time di dashboard + endpoint Prometheus `/metrics`
 - ✅ Auto-detect BIRD version (2.x/3.x)
 - ✅ Dashboard web modern (React + Tailwind CSS)
@@ -412,7 +412,9 @@ RTBH_BIRD_COMMAND='birdc -s /var/run/bird/bird.ctl configure' \
 | `RTBH_SCHEDULER_TICK_SECONDS` | `15` | Interval sync check |
 | `RTBH_IPINFO_TOKEN` | *(disabled)* | ipinfo.io token untuk ASN lookup |
 | `RTBH_BGP_AUTO_ACCEPT` | `true` | Izinkan agent auto-accept peer dari ASN whitelist |
-| `RTBH_ID_ASN_SOURCE_URL` | APNIC extended | URL sumber daftar ASN Indonesia |
+| `RTBH_WHITELIST_STRICT_ID` | `true` | Tolak manual add ASN yang tidak ada di registry country-ID RIR |
+| `RTBH_ID_ASN_SOURCE_URL` | semua RIR | Override satu URL sumber daftar ASN Indonesia |
+| `RTBH_ID_ASN_SOURCE_URLS` | semua RIR | Override daftar URL (dipisah koma) sumber ASN Indonesia |
 | `RTBH_AUTH_USER` | *(disabled)* | Auth username |
 | `RTBH_AUTH_PASS` | *(disabled)* | Auth password |
 | `RTBH_AUTH_SESSION_SECRET` | *(random)* | Session signing key |
@@ -456,10 +458,15 @@ dan menerima sesi BGP masuk dari ASN yang ada di whitelist portal.
 
 - Inbound session dari ASN yang tidak di-whitelist ditolak dengan NOTIFICATION.
 - Peer statis dari halaman **Peers** tetap dipakai, baik aktif maupun inbound.
-- Import ASN Indonesia memakai file delegasi APNIC
-  (`https://ftp.apnic.net/stats/apnic/delegated-apnic-extended-latest`).
-  Override dengan `RTBH_ID_ASN_SOURCE_URL` atau tombol **Import Indonesian ASNs**
-  di halaman **ASN Whitelist**.
+- Import ASN Indonesia menggabungkan file delegasi APNIC, ARIN, RIPE, LACNIC,
+  dan AFRINIC. Ini penting karena organisasi Indonesia bisa saja mendapat ASN
+  dari RIR di luar APNIC. Override dengan `RTBH_ID_ASN_SOURCE_URL` /
+  `RTBH_ID_ASN_SOURCE_URLS` atau tombol **Import Indonesian ASNs** di halaman
+  **ASN Whitelist**.
+- Dengan `RTBH_WHITELIST_STRICT_ID=true` (default), penambahan manual ditolak
+  bila ASN tidak ada di cache registry country-ID RIR. Gunakan `allow_non_id`
+  pada request API atau centang **Allow non-Indonesian ASN** di UI untuk
+  override eksplisit.
 - Monitoring sesi BGP tersedia di halaman **BGP Monitor** pada portal dan
   endpoint Prometheus `GET /metrics`.
 
@@ -524,7 +531,7 @@ Response:
 
 ```http
 GET    /api/v1/whitelist
-POST   /api/v1/whitelist                  {"asn": 7713, "name": "ISP"}
+POST   /api/v1/whitelist                  {"asn": 7713, "name": "ISP", "allow_non_id": false}
 DELETE /api/v1/whitelist/:id
 PUT    /api/v1/whitelist/:id/toggle       {"enabled": true}
 PUT    /api/v1/whitelist/auto-accept      {"enabled": true}

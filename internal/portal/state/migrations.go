@@ -84,6 +84,10 @@ var migrations = []string{
 		agent_id    TEXT,
 		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`CREATE TABLE IF NOT EXISTS id_asn_registry (
+		asn         INTEGER PRIMARY KEY,
+		updated_at  DATETIME
+	)`,
 	`CREATE TABLE IF NOT EXISTS agent_bgp_status (
 		agent_id    TEXT PRIMARY KEY,
 		engine      TEXT,

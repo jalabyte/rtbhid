@@ -7,3 +7,5 @@ rtbhd
 /data/*.db
 .DS_Store
 .sisyphus/
+.opencode/
+CLAUDE.md

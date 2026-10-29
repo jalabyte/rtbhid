@@ -798,14 +798,17 @@ func (s *Server) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{
-			"items":       s.svc.ListWhitelistASNs(),
-			"count":       s.svc.GetWhitelistCount(),
-			"auto_accept": s.svc.AutoAcceptEnabled(),
+			"items":             s.svc.ListWhitelistASNs(),
+			"count":             s.svc.GetWhitelistCount(),
+			"auto_accept":       s.svc.AutoAcceptEnabled(),
+			"strict_id":         s.svc.StrictIDWhitelist(),
+			"id_registry_count": s.svc.IDASNRegistryCount(),
 		})
 	case http.MethodPost:
 		var req struct {
-			ASN  uint32 `json:"asn"`
-			Name string `json:"name"`
+			ASN        uint32 `json:"asn"`
+			Name       string `json:"name"`
+			AllowNonID bool   `json:"allow_non_id"`
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, err)
@@ -815,7 +818,7 @@ func (s *Server) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, errors.New("asn is required"))
 			return
 		}
-		entry, err := s.svc.AddWhitelistASN(req.ASN, strings.TrimSpace(req.Name))
+		entry, err := s.svc.AddWhitelistASN(req.ASN, strings.TrimSpace(req.Name), req.AllowNonID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -845,9 +848,11 @@ func (s *Server) handleWhitelistByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"created": created,
-			"total":   total,
-			"count":   s.svc.GetWhitelistCount(),
+			"created":           created,
+			"total":             total,
+			"count":             s.svc.GetWhitelistCount(),
+			"id_registry_count": s.svc.IDASNRegistryCount(),
+			"warnings":          s.svc.IDASNWarnings(),
 		})
 		return
 	case "auto-accept":

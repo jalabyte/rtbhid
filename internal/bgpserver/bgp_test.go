@@ -137,7 +137,7 @@ func TestOpenRoundTrip(t *testing.T) {
 func TestUpdateRoundTrip(t *testing.T) {
 	prefixes := [][4]byte{{10, 0, 0, 0}, {192, 0, 2, 0}}
 	bits := []int{8, 24}
-	raw := encodeUpdateV4(prefixes, bits, 65000, true, [4]byte{1, 2, 3, 4}, []uint32{65535<<16 | 666}, nil)
+	raw := encodeUpdateV4(prefixes, bits, 65000, true, [4]byte{1, 2, 3, 4}, []uint32{65535<<16 | 666}, nil, false)
 	msg, err := readMessage(bytesReader(raw))
 	if err != nil {
 		t.Fatalf("read: %v", err)
@@ -272,6 +272,66 @@ func TestSetRoutesWithdrawsRemovedPrefixes(t *testing.T) {
 	}
 	if !sawWithdraw {
 		t.Fatal("expected withdrawal for removed prefix")
+	}
+}
+
+func TestIBGPUpdateOmitsASPathAndSetsLocalPref(t *testing.T) {
+	raw := encodeUpdateV4([][4]byte{{10, 0, 0, 0}}, []int{8}, 65000, true, [4]byte{1, 2, 3, 4}, nil, nil, true)
+	msg, err := readMessage(bytesReader(raw))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	u, err := decodeUpdate(msg.Body)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if u.ASPathLen != 0 {
+		t.Fatalf("iBGP UPDATE must not prepend AS_PATH, got len %d", u.ASPathLen)
+	}
+	if u.LocalPref != 100 {
+		t.Fatalf("expected LOCAL_PREF 100, got %d", u.LocalPref)
+	}
+}
+
+func TestSetPeersRemovalStopsSession(t *testing.T) {
+	peerServer := startTestServer(t, testConfig(65000))
+	peerServer.SetAllowlist([]uint32{65010}, true)
+
+	dialer := startTestServer(t, testConfig(65010))
+	host, port, err := net.SplitHostPort(peerServer.Addr())
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+	var portNum int
+	if _, err := fmt.Sscanf(port, "%d", &portNum); err != nil {
+		t.Fatalf("parse port: %v", err)
+	}
+	dialer.SetPeers([]PeerConfig{{
+		Name:     "peer-a",
+		Neighbor: host,
+		Port:     portNum,
+		RemoteAS: 65000,
+		Enabled:  true,
+	}})
+
+	waitFor(t, 5*time.Second, func() bool {
+		for _, s := range dialer.Stats() {
+			if s.State == stateEstablished {
+				return true
+			}
+		}
+		return false
+	})
+
+	dialer.SetPeers(nil)
+	waitFor(t, 5*time.Second, func() bool {
+		return len(dialer.Stats()) == 0
+	})
+
+	// Ensure the removed peer is not reconnected after the backoff window.
+	time.Sleep(1500 * time.Millisecond)
+	if got := len(dialer.Stats()); got != 0 {
+		t.Fatalf("expected no sessions after peer removal, got %d", got)
 	}
 }
 

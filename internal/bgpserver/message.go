@@ -336,6 +336,12 @@ func attrNextHopV4(ip [4]byte) pathAttr {
 	return pathAttr{Flags: 0x40, Code: attrNextHop, Value: ip[:]}
 }
 
+func makeLocalPref(value uint32) pathAttr {
+	var b [4]byte
+	binary.BigEndian.PutUint32(b[:], value)
+	return pathAttr{Flags: 0x40, Code: attrLocalPref, Value: b[:]}
+}
+
 func makeCommunities(comms []uint32) pathAttr {
 	v := make([]byte, 0, len(comms)*4)
 	for _, c := range comms {
@@ -386,8 +392,14 @@ func encodeNLRI(prefix []byte, bits int) []byte {
 	return out
 }
 
-func encodeUpdateV4(prefixes [][4]byte, bits []int, localASN uint32, as4 bool, nextHop [4]byte, comms []uint32, large []LargeCommunity) []byte {
-	attrs := []pathAttr{attrOriginIGP(), makeASPath(localASN, as4), attrNextHopV4(nextHop)}
+func encodeUpdateV4(prefixes [][4]byte, bits []int, localASN uint32, as4 bool, nextHop [4]byte, comms []uint32, large []LargeCommunity, ibgp bool) []byte {
+	attrs := []pathAttr{attrOriginIGP()}
+	if ibgp {
+		attrs = append(attrs, makeLocalPref(100))
+	} else {
+		attrs = append(attrs, makeASPath(localASN, as4))
+	}
+	attrs = append(attrs, attrNextHopV4(nextHop))
 	if len(comms) > 0 {
 		attrs = append(attrs, makeCommunities(comms))
 	}
@@ -409,8 +421,13 @@ func encodeUpdateV4(prefixes [][4]byte, bits []int, localASN uint32, as4 bool, n
 	return encodeMessage(msgUpdate, body)
 }
 
-func encodeUpdateV6(prefixes [][16]byte, bits []int, localASN uint32, as4 bool, nextHop [16]byte, comms []uint32, large []LargeCommunity) []byte {
-	attrs := []pathAttr{attrOriginIGP(), makeASPath(localASN, as4)}
+func encodeUpdateV6(prefixes [][16]byte, bits []int, localASN uint32, as4 bool, nextHop [16]byte, comms []uint32, large []LargeCommunity, ibgp bool) []byte {
+	attrs := []pathAttr{attrOriginIGP()}
+	if ibgp {
+		attrs = append(attrs, makeLocalPref(100))
+	} else {
+		attrs = append(attrs, makeASPath(localASN, as4))
+	}
 	if len(comms) > 0 {
 		attrs = append(attrs, makeCommunities(comms))
 	}
@@ -439,6 +456,7 @@ type updateMessage struct {
 	Withdrawn        []netipPrefix
 	Announced        []netipPrefix
 	ASPathLen        int
+	LocalPref        uint32
 	Communities      []uint32
 	LargeCommunities []LargeCommunity
 	MPAnnounced      []netipPrefix
@@ -505,6 +523,10 @@ func decodeUpdate(body []byte) (*updateMessage, error) {
 		switch code {
 		case attrASPath:
 			u.ASPathLen = asPathCount(val)
+		case attrLocalPref:
+			if len(val) >= 4 {
+				u.LocalPref = binary.BigEndian.Uint32(val[0:4])
+			}
 		case attrCommunities:
 			for i := 0; i+4 <= len(val); i += 4 {
 				u.Communities = append(u.Communities, binary.BigEndian.Uint32(val[i:i+4]))

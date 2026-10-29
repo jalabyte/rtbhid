@@ -107,6 +107,8 @@ export interface WhitelistResponse {
   items: WhitelistASN[];
   count: number;
   auto_accept: boolean;
+  strict_id: boolean;
+  id_registry_count: number;
 }
 
 export interface BGPSession {
@@ -275,8 +277,11 @@ export const api = {
   deletePeer: (id: string) => deleteJSON(`/peers/${id}`),
 
   getWhitelist: () => fetchJSON<WhitelistResponse>("/whitelist"),
-  addWhitelistASN: (data: { asn: number; name: string }) =>
-    postJSON<WhitelistASN>("/whitelist", data),
+  addWhitelistASN: (data: {
+    asn: number;
+    name: string;
+    allow_non_id?: boolean;
+  }) => postJSON<WhitelistASN>("/whitelist", data),
   deleteWhitelistASN: (id: string) => deleteJSON(`/whitelist/${id}`),
   toggleWhitelistASN: (id: string, enabled: boolean) =>
     fetch(`${BASE}/whitelist/${id}/toggle`, {
@@ -285,10 +290,13 @@ export const api = {
       body: JSON.stringify({ enabled }),
     }),
   importIndonesianASNs: () =>
-    postJSON<{ created: number; total: number; count: number }>(
-      "/whitelist/import",
-      {},
-    ),
+    postJSON<{
+      created: number;
+      total: number;
+      count: number;
+      id_registry_count: number;
+      warnings: string[];
+    }>("/whitelist/import", {}),
   setAutoAccept: (enabled: boolean) =>
     fetch(`${BASE}/whitelist/auto-accept`, {
       method: "PUT",

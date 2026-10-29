@@ -24,6 +24,9 @@ const PAGE_SIZE = 100;
 export default function Whitelist() {
   const [items, setItems] = useState<WhitelistASN[]>([]);
   const [autoAccept, setAutoAccept] = useState(true);
+  const [strictID, setStrictID] = useState(true);
+  const [registryCount, setRegistryCount] = useState(0);
+  const [allowNonID, setAllowNonID] = useState(false);
   const [form, setForm] = useState({ asn: "", name: "" });
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
@@ -36,6 +39,8 @@ export default function Whitelist() {
       .then((r) => {
         setItems(r?.items ?? []);
         setAutoAccept(r?.auto_accept ?? true);
+        setStrictID(r?.strict_id ?? true);
+        setRegistryCount(r?.id_registry_count ?? 0);
       })
       .catch(() => setItems([]));
   };
@@ -64,7 +69,11 @@ export default function Whitelist() {
     setBusy(true);
     setMessage("");
     try {
-      await api.addWhitelistASN({ asn, name: form.name.trim() });
+      await api.addWhitelistASN({
+        asn,
+        name: form.name.trim(),
+        allow_non_id: allowNonID,
+      });
       setForm({ asn: "", name: "" });
       load();
     } catch (err) {
@@ -80,7 +89,10 @@ export default function Whitelist() {
     try {
       const r = await api.importIndonesianASNs();
       setMessage(
-        `Imported ${r.created} Indonesian ASNs from APNIC (${r.total} found).`,
+        `Imported ${r.created} Indonesian ASNs from RIR data (${r.total} found, ${r.id_registry_count} cached).` +
+          (r.warnings?.length
+            ? ` ${r.warnings.length} source(s) failed: ${r.warnings.join("; ")}`
+            : ""),
       );
       load();
     } catch (err) {
@@ -115,6 +127,8 @@ export default function Whitelist() {
         <Badge variant={autoAccept ? "default" : "secondary"}>
           Auto-accept {autoAccept ? "on" : "off"}
         </Badge>
+        <Badge variant="outline">{registryCount} ID ASNs cached</Badge>
+        {strictID && <Badge variant="outline">strict Indonesian only</Badge>}
         <Button variant="outline" size="sm" onClick={handleAutoAccept}>
           <Power className="h-4 w-4 mr-1" />
           Turn {autoAccept ? "off" : "on"}
@@ -129,8 +143,11 @@ export default function Whitelist() {
           <p className="text-sm text-muted-foreground">
             Agents running the embedded BGP server accept inbound peering
             sessions only from enabled ASNs in this list. Use "Import
-            Indonesian ASNs" to load the current APNIC list (country ID), then
-            add or remove individual ASNs manually.
+            Indonesian ASNs" to load country-ID ASNs delegated by APNIC, ARIN,
+            RIPE, LACNIC, and AFRINIC, then add or remove individual ASNs
+            manually. With strict mode on, manual additions must exist in the
+            cached Indonesian registry unless you explicitly allow a
+            non-Indonesian ASN.
           </p>
 
           <div className="flex gap-2 flex-wrap">
@@ -159,6 +176,15 @@ export default function Whitelist() {
               <Download className="h-4 w-4 mr-1" />
               Import Indonesian ASNs
             </Button>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground px-1">
+              <input
+                type="checkbox"
+                checked={allowNonID}
+                onChange={(e) => setAllowNonID(e.target.checked)}
+                className="h-4 w-4"
+              />
+              Allow non-Indonesian ASN
+            </label>
           </div>
 
           {message && (
