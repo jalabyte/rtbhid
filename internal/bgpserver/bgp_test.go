@@ -410,6 +410,99 @@ func TestSetPeersConfigChangeStopsOldSession(t *testing.T) {
 	dialer.SetPeers(nil)
 }
 
+func TestInboundRejectedWhenAutoAcceptDisabled(t *testing.T) {
+	srv := startTestServer(t, testConfig(65000))
+	srv.SetAllowlist([]uint32{65001}, false)
+
+	_, notifs := testPeer(t, srv.Addr(), 65001, false)
+	if len(notifs) != 1 || notifs[0].Type != msgNotification {
+		t.Fatal("expected NOTIFICATION when auto-accept is disabled, even for a whitelisted ASN")
+	}
+}
+
+func TestOpenWithFourByteASN(t *testing.T) {
+	raw := encodeOpen(402969, 90, 0x0a000001, false)
+	msg, err := readMessage(bytesReader(raw))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	open, err := decodeOpen(msg.Body)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if open.MyAS != asTrans || !open.HasAS4 || open.AS4 != 402969 {
+		t.Fatalf("unexpected 4-byte ASN OPEN: %+v", open)
+	}
+}
+
+func TestIBGPv6SessionAttributes(t *testing.T) {
+	srv := startTestServer(t, testConfig(65000))
+	srv.SetRoutes([]string{"2001:db8:1::/48"})
+	srv.SetAllowlist([]uint32{65000}, true)
+
+	conn, notifs := testPeer(t, srv.Addr(), 65000, true)
+	if len(notifs) == 1 {
+		t.Fatal("iBGP v6 peer was unexpectedly rejected")
+	}
+	sets := readUpdates(t, conn, 1, 3*time.Second)
+	if len(sets) == 0 || len(sets[0].update.MPAnnounced) != 1 {
+		t.Fatalf("expected one MP_REACH announcement, got %+v", sets)
+	}
+	if sets[0].update.ASPathLen != 0 || sets[0].update.LocalPref != 100 {
+		t.Fatalf("unexpected iBGP v6 attributes: path=%d localpref=%d",
+			sets[0].update.ASPathLen, sets[0].update.LocalPref)
+	}
+}
+
+func TestSetPeersSameConfigKeepsSession(t *testing.T) {
+	peerServer := startTestServer(t, testConfig(65000))
+	peerServer.SetAllowlist([]uint32{65010}, true)
+
+	dialer := startTestServer(t, testConfig(65010))
+	host, port, err := net.SplitHostPort(peerServer.Addr())
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+	var portNum int
+	if _, err := fmt.Sscanf(port, "%d", &portNum); err != nil {
+		t.Fatalf("parse port: %v", err)
+	}
+	peer := PeerConfig{Name: "peer-a", Neighbor: host, Port: portNum, RemoteAS: 65000, Enabled: true}
+	dialer.SetPeers([]PeerConfig{peer})
+
+	waitFor(t, 5*time.Second, func() bool {
+		for _, s := range peerServer.Stats() {
+			if s.State == stateEstablished {
+				return true
+			}
+		}
+		return false
+	})
+	var established time.Time
+	for _, s := range peerServer.Stats() {
+		if s.State == stateEstablished {
+			established = s.Established
+		}
+	}
+
+	// Re-applying an identical config must not tear down the session.
+	dialer.SetPeers([]PeerConfig{peer})
+	time.Sleep(500 * time.Millisecond)
+
+	count := 0
+	for _, s := range peerServer.Stats() {
+		if s.State == stateEstablished {
+			count++
+			if !s.Established.Equal(established) {
+				t.Fatalf("session was restarted on identical SetPeers: %s != %s", s.Established, established)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one established session, got %d", count)
+	}
+}
+
 // bytesReader adapts a byte slice to io.Reader without importing bytes in the
 // test hot path.
 type byteReader struct {

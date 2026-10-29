@@ -925,6 +925,14 @@ func (s *Server) handleBGP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.svc.BGPOverview())
 }
 
+// bgpStaleAfter is how long after the last agent report a session is considered
+// stale in metrics.
+const bgpStaleAfter = 60 * time.Second
+
+func sessionStale(updated time.Time) bool {
+	return updated.IsZero() || time.Since(updated) > bgpStaleAfter
+}
+
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -942,6 +950,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	overview := s.svc.BGPOverview()
+	staleSessions := 0
+	for _, sess := range overview.Items {
+		if sessionStale(sess.UpdatedAt) {
+			staleSessions++
+		}
+	}
 
 	type agentAgg struct {
 		engine      string
@@ -982,23 +996,34 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("# HELP rtbhid_bgp_prefixes_received Number of prefixes received from established peers.\n")
 	b.WriteString("# TYPE rtbhid_bgp_prefixes_received gauge\n")
 	fmt.Fprintf(&b, "rtbhid_bgp_prefixes_received %d\n", overview.PrefixesIn)
+	b.WriteString("# HELP rtbhid_bgp_sessions_stale Number of sessions whose agent report is older than 60s.\n")
+	b.WriteString("# TYPE rtbhid_bgp_sessions_stale gauge\n")
+	fmt.Fprintf(&b, "rtbhid_bgp_sessions_stale %d\n", staleSessions)
 	b.WriteString("# HELP rtbhid_agent_bgp_sessions BGP sessions per agent.\n")
 	b.WriteString("# TYPE rtbhid_agent_bgp_sessions gauge\n")
 	for _, id := range names {
 		agg := agents[id]
-		fmt.Fprintf(&b, "rtbhid_agent_bgp_sessions{agent=%q,engine=%q} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.sessions)
-		fmt.Fprintf(&b, "rtbhid_agent_bgp_sessions_established{agent=%q,engine=%q} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.established)
-		fmt.Fprintf(&b, "rtbhid_agent_bgp_prefixes_received{agent=%q,engine=%q} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.prefixesIn)
+		fmt.Fprintf(&b, "rtbhid_agent_bgp_sessions{agent=\"%s\",engine=\"%s\"} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.sessions)
+		fmt.Fprintf(&b, "rtbhid_agent_bgp_sessions_established{agent=\"%s\",engine=\"%s\"} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.established)
+		fmt.Fprintf(&b, "rtbhid_agent_bgp_prefixes_received{agent=\"%s\",engine=\"%s\"} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.prefixesIn)
 	}
 	b.WriteString("# HELP rtbhid_bgp_session_up Whether a BGP session is established (1) or not (0).\n")
 	b.WriteString("# TYPE rtbhid_bgp_session_up gauge\n")
+	b.WriteString("# HELP rtbhid_bgp_session_stale Whether the last report for this session is older than 60s.\n")
+	b.WriteString("# TYPE rtbhid_bgp_session_stale gauge\n")
 	for _, sess := range overview.Items {
 		up := 0
 		if strings.EqualFold(sess.State, "established") {
 			up = 1
 		}
-		fmt.Fprintf(&b, "rtbhid_bgp_session_up{agent=%q,peer=%q,remote_as=%q,passive=%q} %d\n",
+		stale := 0
+		if sessionStale(sess.UpdatedAt) {
+			stale = 1
+		}
+		fmt.Fprintf(&b, "rtbhid_bgp_session_up{agent=\"%s\",peer=\"%s\",remote_as=\"%s\",passive=\"%s\"} %d\n",
 			escapeLabel(sess.AgentID), escapeLabel(sess.Peer), strconv.FormatUint(uint64(sess.RemoteAS), 10), strconv.FormatBool(sess.Passive), up)
+		fmt.Fprintf(&b, "rtbhid_bgp_session_stale{agent=\"%s\",peer=\"%s\"} %d\n",
+			escapeLabel(sess.AgentID), escapeLabel(sess.Peer), stale)
 	}
 	_, _ = w.Write([]byte(b.String()))
 }

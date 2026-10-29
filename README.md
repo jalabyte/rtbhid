@@ -560,10 +560,11 @@ GET /metrics          # format Prometheus (publik kecuali RTBH_METRICS_TOKEN di-
 
 Metrik yang tersedia: `rtbhid_bgp_agents`, `rtbhid_bgp_sessions_total`,
 `rtbhid_bgp_sessions_established`, `rtbhid_bgp_prefixes_received`,
-`rtbhid_agent_bgp_sessions{agent,engine}`,
+`rtbhid_bgp_sessions_stale`, `rtbhid_agent_bgp_sessions{agent,engine}`,
 `rtbhid_agent_bgp_sessions_established{agent,engine}`,
-`rtbhid_agent_bgp_prefixes_received{agent,engine}`, dan
-`rtbhid_bgp_session_up{agent,peer,remote_as,passive}`.
+`rtbhid_agent_bgp_prefixes_received{agent,engine}`,
+`rtbhid_bgp_session_up{agent,peer,remote_as,passive}`, dan
+`rtbhid_bgp_session_stale{agent,peer}`.
 
 ### Prefixes
 

@@ -19,7 +19,7 @@ func TestParseAPNICIDASNs(t *testing.T) {
 		"apnic|ID|ipv4|1.1.1.0|256|20110101|allocated",
 		"apnic|ID|asn|not-a-number|1|20110101|allocated",
 		// Country-ID ASNs can be delegated by other RIRs.
-		"arin|ID|asn|64500|1|20100101|allocated",
+		"arin|ID|asn|64500|1|20100101|assigned|opaqueid",
 		"ripencc|ID|asn|64501|1|20100101|allocated",
 		"lacnic|ID|asn|64502|1|20100101|allocated",
 		"afrinic|ID|asn|64503|1|20100101|allocated",
@@ -39,6 +39,30 @@ func TestParseAPNICIDASNs(t *testing.T) {
 		if asns[i] != want[i] {
 			t.Fatalf("got %v, want %v", asns, want)
 		}
+	}
+}
+
+func TestNewIDASNRegistryURLsDefaults(t *testing.T) {
+	reg := NewIDASNRegistryURLs(nil)
+	if len(reg.urls) != len(DefaultIDASNSourceURLs) {
+		t.Fatalf("expected %d default RIR sources, got %d", len(DefaultIDASNSourceURLs), len(reg.urls))
+	}
+}
+
+func TestIDASNRegistryFetchAllEmptyFails(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/empty", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "ripencc|NL|asn|3758|1|19991022|allocated\n")
+	})
+	mux.HandleFunc("/fail", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	reg := NewIDASNRegistryURLs([]string{srv.URL + "/empty", srv.URL + "/fail"})
+	if _, err := reg.Fetch(context.Background()); err == nil {
+		t.Fatal("expected error when no source yields Indonesian ASNs")
 	}
 }
 

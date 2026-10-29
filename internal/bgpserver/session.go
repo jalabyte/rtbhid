@@ -118,7 +118,7 @@ func (s *session) info() SessionInfo {
 		info.LastError = v
 	}
 	if ts := s.establishedAt.Load(); ts > 0 {
-		info.Established = time.Unix(ts, 0)
+		info.Established = time.Unix(0, ts)
 		info.UptimeSec = int64(time.Since(info.Established).Seconds())
 	}
 	return info
@@ -254,7 +254,7 @@ func (s *Server) runSession(sess *session) {
 
 established:
 	sess.established.Store(true)
-	sess.establishedAt.Store(time.Now().Unix())
+	sess.establishedAt.Store(time.Now().UnixNano())
 	sess.setState(stateEstablished)
 	s.log.Printf("bgpserver: session established with %s AS%d (%s)", sess.remoteIP(), sess.remoteAS, sess.name())
 
