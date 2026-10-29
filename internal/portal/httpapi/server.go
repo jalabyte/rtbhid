@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -80,6 +81,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/peers/bulk", s.handlePeerBulk)
 	mux.HandleFunc("/api/v1/peers/", s.handlePeerByID)
 
+	// ASN whitelist for auto-accepted BGP peers
+	mux.HandleFunc("/api/v1/whitelist", s.handleWhitelist)
+	mux.HandleFunc("/api/v1/whitelist/", s.handleWhitelistByID)
+
+	// BGP monitoring
+	mux.HandleFunc("/api/v1/bgp", s.handleBGP)
+	mux.HandleFunc("/metrics", s.handleMetrics)
+
 	// Events
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
 
@@ -117,12 +126,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
+	bgp := s.svc.BGPOverview()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"agents":             len(s.svc.ListAgents()),
 		"prefixes":           len(s.svc.ListPrefixes()),
 		"sources":            len(s.svc.ListSources()),
 		"excludes":           len(s.svc.ListExcludes()),
 		"peers":              len(s.svc.ListPeers()),
+		"whitelist":          s.svc.GetWhitelistCount(),
+		"auto_accept":        s.svc.AutoAcceptEnabled(),
+		"bgp_sessions":       bgp.Sessions,
+		"bgp_established":    bgp.Established,
 		"effective_prefixes": s.svc.GetEffectivePrefixCount(),
 		"local_asn":          s.svc.GetLocalASN(),
 	})
@@ -777,6 +791,202 @@ func (s *Server) handlePeerByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// ASN whitelist
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleWhitelist(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items":       s.svc.ListWhitelistASNs(),
+			"count":       s.svc.GetWhitelistCount(),
+			"auto_accept": s.svc.AutoAcceptEnabled(),
+		})
+	case http.MethodPost:
+		var req struct {
+			ASN  uint32 `json:"asn"`
+			Name string `json:"name"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if req.ASN == 0 {
+			writeError(w, http.StatusBadRequest, errors.New("asn is required"))
+			return
+		}
+		entry, err := s.svc.AddWhitelistASN(req.ASN, strings.TrimSpace(req.Name))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, entry)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleWhitelistByID(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/whitelist/")
+	if rest == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	switch rest {
+	case "import":
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		created, total, err := s.svc.ImportIndonesianASNs(r.Context())
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"created": created,
+			"total":   total,
+			"count":   s.svc.GetWhitelistCount(),
+		})
+		return
+	case "auto-accept":
+		if r.Method != http.MethodPut {
+			methodNotAllowed(w)
+			return
+		}
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		s.svc.SetAutoAccept(req.Enabled)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "enabled": req.Enabled})
+		return
+	}
+
+	// /api/v1/whitelist/{id}/toggle
+	if strings.HasSuffix(rest, "/toggle") {
+		id := strings.TrimSuffix(rest, "/toggle")
+		if r.Method != http.MethodPut {
+			methodNotAllowed(w)
+			return
+		}
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := s.svc.ToggleWhitelistASN(id, req.Enabled); err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+
+	if r.Method != http.MethodDelete {
+		methodNotAllowed(w)
+		return
+	}
+	if err := s.svc.DeleteWhitelistASN(rest); err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+// ---------------------------------------------------------------------------
+// BGP monitoring
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleBGP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.svc.BGPOverview())
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	overview := s.svc.BGPOverview()
+
+	type agentAgg struct {
+		engine      string
+		sessions    int
+		established int
+		prefixesIn  int
+	}
+	agents := make(map[string]*agentAgg)
+	for _, sess := range overview.Items {
+		agg := agents[sess.AgentID]
+		if agg == nil {
+			agg = &agentAgg{engine: overview.Engines[sess.AgentID]}
+			agents[sess.AgentID] = agg
+		}
+		agg.sessions++
+		if strings.EqualFold(sess.State, "established") {
+			agg.established++
+			agg.prefixesIn += sess.PrefixesIn
+		}
+	}
+	names := make([]string, 0, len(agents))
+	for id := range agents {
+		names = append(names, id)
+	}
+	sort.Strings(names)
+
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	var b strings.Builder
+	b.WriteString("# HELP rtbhid_bgp_agents Number of agents reporting BGP telemetry.\n")
+	b.WriteString("# TYPE rtbhid_bgp_agents gauge\n")
+	fmt.Fprintf(&b, "rtbhid_bgp_agents %d\n", overview.Agents)
+	b.WriteString("# HELP rtbhid_bgp_sessions_total Number of BGP sessions reported by agents.\n")
+	b.WriteString("# TYPE rtbhid_bgp_sessions_total gauge\n")
+	fmt.Fprintf(&b, "rtbhid_bgp_sessions_total %d\n", overview.Sessions)
+	b.WriteString("# HELP rtbhid_bgp_sessions_established Number of established BGP sessions.\n")
+	b.WriteString("# TYPE rtbhid_bgp_sessions_established gauge\n")
+	fmt.Fprintf(&b, "rtbhid_bgp_sessions_established %d\n", overview.Established)
+	b.WriteString("# HELP rtbhid_bgp_prefixes_received Number of prefixes received from established peers.\n")
+	b.WriteString("# TYPE rtbhid_bgp_prefixes_received gauge\n")
+	fmt.Fprintf(&b, "rtbhid_bgp_prefixes_received %d\n", overview.PrefixesIn)
+	b.WriteString("# HELP rtbhid_agent_bgp_sessions BGP sessions per agent.\n")
+	b.WriteString("# TYPE rtbhid_agent_bgp_sessions gauge\n")
+	for _, id := range names {
+		agg := agents[id]
+		fmt.Fprintf(&b, "rtbhid_agent_bgp_sessions{agent=%q,engine=%q} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.sessions)
+		fmt.Fprintf(&b, "rtbhid_agent_bgp_sessions_established{agent=%q,engine=%q} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.established)
+		fmt.Fprintf(&b, "rtbhid_agent_bgp_prefixes_received{agent=%q,engine=%q} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.prefixesIn)
+	}
+	b.WriteString("# HELP rtbhid_bgp_session_up Whether a BGP session is established (1) or not (0).\n")
+	b.WriteString("# TYPE rtbhid_bgp_session_up gauge\n")
+	for _, sess := range overview.Items {
+		up := 0
+		if strings.EqualFold(sess.State, "established") {
+			up = 1
+		}
+		fmt.Fprintf(&b, "rtbhid_bgp_session_up{agent=%q,peer=%q,remote_as=%q,passive=%q} %d\n",
+			escapeLabel(sess.AgentID), escapeLabel(sess.Peer), strconv.FormatUint(uint64(sess.RemoteAS), 10), strconv.FormatBool(sess.Passive), up)
+	}
+	_, _ = w.Write([]byte(b.String()))
+}
+
+func escapeLabel(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\"", "\\\"")
+	value = strings.ReplaceAll(value, "\n", "\\n")
+	return value
+}
+
+// ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
 
@@ -831,37 +1041,27 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	agentID := r.Header.Get("X-Agent-ID")
-	if agentID == "" {
-		var req struct {
-			AgentID     string `json:"agent_id"`
-			PrefixCount int    `json:"prefix_count"`
-			PeerCount   int    `json:"peer_count"`
-			BirdStatus  string `json:"bird_status"`
-		}
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		agentID = req.AgentID
-		if agentID == "" {
-			writeError(w, http.StatusBadRequest, errors.New("X-Agent-ID header or agent_id field is required"))
-			return
-		}
-		s.svc.HandleHeartbeat(agentID, req.PrefixCount, req.PeerCount, req.BirdStatus)
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-		return
-	}
 	var req struct {
-		PrefixCount int    `json:"prefix_count"`
-		PeerCount   int    `json:"peer_count"`
-		BirdStatus  string `json:"bird_status"`
+		AgentID     string             `json:"agent_id"`
+		PrefixCount int                `json:"prefix_count"`
+		PeerCount   int                `json:"peer_count"`
+		BirdStatus  string             `json:"bird_status"`
+		BGPEngine   string             `json:"bgp_engine"`
+		BGPSessions []state.BGPSession `json:"bgp_sessions"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	s.svc.HandleHeartbeat(agentID, req.PrefixCount, req.PeerCount, req.BirdStatus)
+	agentID := r.Header.Get("X-Agent-ID")
+	if agentID == "" {
+		agentID = req.AgentID
+	}
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("X-Agent-ID header or agent_id field is required"))
+		return
+	}
+	s.svc.HandleHeartbeat(agentID, req.PrefixCount, req.PeerCount, req.BirdStatus, req.BGPEngine, req.BGPSessions)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

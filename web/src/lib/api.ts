@@ -87,8 +87,50 @@ export interface Status {
   sources: number;
   excludes: number;
   peers: number;
+  whitelist?: number;
+  auto_accept?: boolean;
   effective_prefixes: number;
   local_asn: number;
+}
+
+export interface WhitelistASN {
+  id: string;
+  asn: number;
+  name: string;
+  country: string;
+  source: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface WhitelistResponse {
+  items: WhitelistASN[];
+  count: number;
+  auto_accept: boolean;
+}
+
+export interface BGPSession {
+  agent_id: string;
+  agent_name?: string;
+  peer: string;
+  name: string;
+  remote_as: number;
+  local_as: number;
+  state: string;
+  passive: boolean;
+  uptime_sec: number;
+  prefixes_in: number;
+  last_error: string;
+  updated_at: string;
+}
+
+export interface BGPOverview {
+  agents: number;
+  sessions: number;
+  established: number;
+  prefixes_in: number;
+  engines: Record<string, string>;
+  items: BGPSession[];
 }
 
 export interface LookupMatch {
@@ -232,8 +274,32 @@ export const api = {
     }),
   deletePeer: (id: string) => deleteJSON(`/peers/${id}`),
 
+  getWhitelist: () => fetchJSON<WhitelistResponse>("/whitelist"),
+  addWhitelistASN: (data: { asn: number; name: string }) =>
+    postJSON<WhitelistASN>("/whitelist", data),
+  deleteWhitelistASN: (id: string) => deleteJSON(`/whitelist/${id}`),
+  toggleWhitelistASN: (id: string, enabled: boolean) =>
+    fetch(`${BASE}/whitelist/${id}/toggle`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
+  importIndonesianASNs: () =>
+    postJSON<{ created: number; total: number; count: number }>(
+      "/whitelist/import",
+      {},
+    ),
+  setAutoAccept: (enabled: boolean) =>
+    fetch(`${BASE}/whitelist/auto-accept`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
+
   getEvents: (limit = 100) =>
     fetchJSON<{ items: Event[] }>(`/events?limit=${limit}`),
+
+  getBGPOverview: () => fetchJSON<BGPOverview>("/bgp"),
 
   buildPrefixesFromASN: (data: {
     asn: string;

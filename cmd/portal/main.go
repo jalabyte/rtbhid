@@ -30,6 +30,8 @@ func main() {
 	tickSec := getEnvInt("RTBH_SCHEDULER_TICK_SECONDS", 15)
 	grpcMaxMsgSize := getEnvInt("RTBH_GRPC_MAX_MSG_SIZE", 0)
 	ipinfoToken := getEnv("RTBH_IPINFO_TOKEN", "")
+	autoAccept := getEnvBool("RTBH_BGP_AUTO_ACCEPT", true)
+	idASNURL := getEnv("RTBH_ID_ASN_SOURCE_URL", "")
 
 	authCfg := httpapi.AuthConfig{
 		Enabled:       os.Getenv("RTBH_AUTH_USER") != "",
@@ -48,6 +50,10 @@ func main() {
 
 	fetcher := syncer.NewFetcher("rtbhid-portal/1.0")
 	svc := portal.NewService(store, fetcher, localASN, tickSec, ipinfoToken)
+	svc.SetAutoAccept(autoAccept)
+	if idASNURL != "" {
+		svc.SetIDASNSourceURL(idASNURL)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -119,4 +125,12 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	return v == "true" || v == "1" || v == "yes"
 }

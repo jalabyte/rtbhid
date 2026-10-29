@@ -36,7 +36,11 @@ func runAgent() {
 	agentName := getEnv("RTBH_AGENT_NAME", hostname())
 	hostName := hostname()
 	birdCommand := getEnv("RTBH_BIRD_COMMAND", "birdc configure")
+	bgpEngine := getEnv("RTBH_BGP_ENGINE", "bird")
 	birdVersion := detectBirdVersion(birdCommand, getEnv("RTBH_BIRD_VERSION", ""))
+	if strings.EqualFold(bgpEngine, "custom") || strings.EqualFold(bgpEngine, "embedded") {
+		birdVersion = "embedded"
+	}
 	birdOutput := getEnv("RTBH_BIRD_OUTPUT", "./data/rtbh_auto.conf")
 	birdPeersOutput := getEnv("RTBH_BIRD_PEERS_OUTPUT", "./data/rtbh_peers_auto.conf")
 	birdReload := getEnvBool("RTBH_BIRD_RELOAD", false)
@@ -46,12 +50,21 @@ func runAgent() {
 	exportLarge := getEnv("RTBH_EXPORT_LARGE_COMMUNITIES", "")
 	grpcMaxMsgSize := getEnvInt("RTBH_GRPC_MAX_MSG_SIZE", 0)
 
-	client := grpcclient.New(grpcclient.Config{
+	bgpListenAddr := getEnv("RTBH_BGP_LISTEN_ADDR", ":179")
+	bgpRouterID := getEnv("RTBH_BGP_ROUTER_ID", "")
+	bgpNexthopV4 := getEnv("RTBH_BGP_NEXTHOP_V4", "")
+	bgpNexthopV6 := getEnv("RTBH_BGP_NEXTHOP_V6", "")
+	bgpHoldTime := getEnvInt("RTBH_BGP_HOLD_TIME_SEC", 90)
+	bgpEnableIPv6 := getEnvBool("RTBH_BGP_ENABLE_IPV6", true)
+	bgpMaxPrefixes := getEnvInt("RTBH_BGP_MAX_PREFIXES", 1000)
+	bgpMaxDynamic := getEnvInt("RTBH_BGP_MAX_DYNAMIC_PEERS", 256)
+
+	client, err := grpcclient.New(grpcclient.Config{
 		PortalURL:          portalURL,
 		AgentName:          agentName,
 		Hostname:           hostName,
 		BirdVersion:        birdVersion,
-		AgentVersion:       "2.0.0",
+		AgentVersion:       "2.1.0",
 		BirdOutputPath:     birdOutput,
 		BirdPeersOutput:    birdPeersOutput,
 		BirdReloadEnabled:  birdReload,
@@ -59,8 +72,20 @@ func runAgent() {
 		LocalASN:           localASN,
 		ExportStdComms:     exportStd,
 		ExportLargeComms:   exportLarge,
+		BGPEngine:          bgpEngine,
+		BGPListenAddr:      bgpListenAddr,
+		BGPRouterID:        bgpRouterID,
+		BGPNexthopV4:       bgpNexthopV4,
+		BGPNexthopV6:       bgpNexthopV6,
+		BGPHoldTimeSec:     bgpHoldTime,
+		BGPEnableIPv6:      bgpEnableIPv6,
+		BGPMaxPrefixes:     bgpMaxPrefixes,
+		BGPMaxDynamic:      bgpMaxDynamic,
 		GRPCMaxRecvMsgSize: grpcMaxMsgSize,
 	})
+	if err != nil {
+		log.Fatalf("init agent: %v", err)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -68,10 +93,21 @@ func runAgent() {
 	fmt.Printf("rtbhd agent mode\n")
 	fmt.Printf("portal: %s\n", portalURL)
 	fmt.Printf("agent name: %s\n", agentName)
-	fmt.Printf("bird version: %s\n", birdVersion)
-	fmt.Printf("bird routes output: %s\n", birdOutput)
-	fmt.Printf("bird peers output: %s\n", birdPeersOutput)
-	fmt.Printf("bird reload: %v\n", birdReload)
+	fmt.Printf("bgp engine: %s\n", bgpEngine)
+	if !strings.EqualFold(bgpEngine, "custom") && !strings.EqualFold(bgpEngine, "embedded") {
+		fmt.Printf("bird version: %s\n", birdVersion)
+		fmt.Printf("bird routes output: %s\n", birdOutput)
+		fmt.Printf("bird peers output: %s\n", birdPeersOutput)
+		fmt.Printf("bird reload: %v\n", birdReload)
+	} else {
+		fmt.Printf("bgp listen address: %s\n", bgpListenAddr)
+		fmt.Printf("bgp router id: %s\n", bgpRouterID)
+		fmt.Printf("bgp next hop v4: %s\n", bgpNexthopV4)
+		fmt.Printf("bgp next hop v6: %s\n", bgpNexthopV6)
+		fmt.Printf("bgp hold time: %ds\n", bgpHoldTime)
+		fmt.Printf("bgp max prefixes: %d\n", bgpMaxPrefixes)
+		fmt.Printf("bgp max dynamic peers: %d\n", bgpMaxDynamic)
+	}
 	fmt.Printf("local ASN: %d\n", localASN)
 	fmt.Printf("export std communities: %s\n", exportStd)
 	fmt.Printf("export large communities: %s\n", exportLarge)

@@ -67,12 +67,41 @@ var migrations = []string{
 		cidr        TEXT NOT NULL,
 		PRIMARY KEY (source_id, cidr)
 	)`,
+	`CREATE TABLE IF NOT EXISTS asn_whitelist (
+		id          TEXT PRIMARY KEY,
+		asn         INTEGER NOT NULL UNIQUE,
+		name        TEXT,
+		country     TEXT DEFAULT 'ID',
+		source      TEXT DEFAULT 'manual',
+		enabled     BOOLEAN DEFAULT 1,
+		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_asn_whitelist_enabled ON asn_whitelist(enabled)`,
 	`CREATE TABLE IF NOT EXISTS events (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
 		type        TEXT NOT NULL,
 		message     TEXT NOT NULL,
 		agent_id    TEXT,
 		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE TABLE IF NOT EXISTS agent_bgp_status (
+		agent_id    TEXT PRIMARY KEY,
+		engine      TEXT,
+		updated_at  DATETIME
+	)`,
+	`CREATE TABLE IF NOT EXISTS agent_bgp_sessions (
+		agent_id    TEXT NOT NULL,
+		peer        TEXT NOT NULL,
+		name        TEXT,
+		remote_as   INTEGER DEFAULT 0,
+		local_as    INTEGER DEFAULT 0,
+		state       TEXT,
+		passive     BOOLEAN DEFAULT 0,
+		uptime_sec  INTEGER DEFAULT 0,
+		prefixes_in INTEGER DEFAULT 0,
+		last_error  TEXT,
+		updated_at  DATETIME,
+		PRIMARY KEY (agent_id, peer)
 	)`,
 	`UPDATE peers SET id = 'peer_' || lower(hex(randomblob(4))) || lower(hex(randomblob(2))) || lower(hex(randomblob(2))) || lower(hex(randomblob(2))) || lower(hex(randomblob(6))) WHERE id IS NULL OR id = ''`,
 }

@@ -32,6 +32,9 @@ RTBHID memiliki tiga mode operasi:
 - ✅ Sinkronisasi prefix dari remote URL (multiple sources)
 - ✅ Exclude list untuk false-positive prevention
 - ✅ Manajemen BGP peer terpusat (single/bulk)
+- ✅ Embedded BGP server (opsional, pengganti BIRD) dengan auto-accept peer
+- ✅ ASN whitelist (default daftar ASN Indonesia dari APNIC, bisa tambah/hapus manual)
+- ✅ Monitoring sesi BGP real-time di dashboard + endpoint Prometheus `/metrics`
 - ✅ Auto-detect BIRD version (2.x/3.x)
 - ✅ Dashboard web modern (React + Tailwind CSS)
 - ✅ REST API lengkap
@@ -408,6 +411,8 @@ RTBH_BIRD_COMMAND='birdc -s /var/run/bird/bird.ctl configure' \
 | `RTBH_LOCAL_ASN` | `65500` | Local ASN untuk semua agent |
 | `RTBH_SCHEDULER_TICK_SECONDS` | `15` | Interval sync check |
 | `RTBH_IPINFO_TOKEN` | *(disabled)* | ipinfo.io token untuk ASN lookup |
+| `RTBH_BGP_AUTO_ACCEPT` | `true` | Izinkan agent auto-accept peer dari ASN whitelist |
+| `RTBH_ID_ASN_SOURCE_URL` | APNIC extended | URL sumber daftar ASN Indonesia |
 | `RTBH_AUTH_USER` | *(disabled)* | Auth username |
 | `RTBH_AUTH_PASS` | *(disabled)* | Auth password |
 | `RTBH_AUTH_SESSION_SECRET` | *(random)* | Session signing key |
@@ -431,6 +436,51 @@ RTBH_BIRD_COMMAND='birdc -s /var/run/bird/bird.ctl configure' \
 | `RTBH_LOCAL_ASN` | `65500` | Local ASN (jika berbeda dari portal) |
 | `RTBH_EXPORT_STD_COMMUNITIES` | *(none)* | Standard BGP communities |
 | `RTBH_EXPORT_LARGE_COMMUNITIES` | *(none)* | Large BGP communities |
+| `RTBH_BGP_ENGINE` | `bird` | `bird` atau `custom` (embedded BGP server) |
+| `RTBH_BGP_LISTEN_ADDR` | `:179` | Alamat listen embedded BGP server |
+| `RTBH_BGP_ROUTER_ID` | *(auto)* | BGP router ID (IPv4) |
+| `RTBH_BGP_NEXTHOP_V4` | *(local addr)* | Next hop untuk announcement IPv4 |
+| `RTBH_BGP_NEXTHOP_V6` | *(local addr)* | Next hop untuk announcement IPv6 |
+| `RTBH_BGP_HOLD_TIME_SEC` | `90` | Hold time BGP |
+| `RTBH_BGP_ENABLE_IPV6` | `true` | Advertise capability IPv6 unicast |
+| `RTBH_BGP_MAX_PREFIXES` | `1000` | Batas prefix yang diterima dari peer |
+| `RTBH_BGP_MAX_DYNAMIC_PEERS` | `256` | Batas sesi inbound auto-accept |
+
+---
+
+## Custom BGP Engine
+
+Agent dapat menjalankan BGP server bawaan (`RTBH_BGP_ENGINE=custom`) sebagai
+pengganti BIRD. Engine ini mengumumkan prefix RTBH (blackhole) ke peer statis
+dan menerima sesi BGP masuk dari ASN yang ada di whitelist portal.
+
+- Inbound session dari ASN yang tidak di-whitelist ditolak dengan NOTIFICATION.
+- Peer statis dari halaman **Peers** tetap dipakai, baik aktif maupun inbound.
+- Import ASN Indonesia memakai file delegasi APNIC
+  (`https://ftp.apnic.net/stats/apnic/delegated-apnic-extended-latest`).
+  Override dengan `RTBH_ID_ASN_SOURCE_URL` atau tombol **Import Indonesian ASNs**
+  di halaman **ASN Whitelist**.
+- Monitoring sesi BGP tersedia di halaman **BGP Monitor** pada portal dan
+  endpoint Prometheus `GET /metrics`.
+
+Catatan deployment:
+
+1. Hentikan dan disable `bird.service` sebelum memakai engine custom karena
+   keduanya memakai TCP/179.
+2. Unit systemd `rtbhd.service` sudah menyertakan
+   `AmbientCapabilities=CAP_NET_BIND_SERVICE` agar agent non-root bisa bind
+   port 179.
+3. Telemetri sesi dikirim lewat heartbeat gRPC tiap 15 detik.
+
+```bash
+RTBH_MODE=agent
+RTBH_PORTAL_URL=portal.example.com:50051
+RTBH_BGP_ENGINE=custom
+RTBH_BGP_LISTEN_ADDR=:179
+RTBH_BGP_ROUTER_ID=192.0.2.1
+RTBH_BGP_NEXTHOP_V4=192.0.2.1
+RTBH_LOCAL_ASN=65500
+```
 
 ---
 
@@ -461,10 +511,39 @@ Response:
   "sources": 5,
   "excludes": 10,
   "peers": 8,
+  "whitelist": 512,
+  "auto_accept": true,
+  "bgp_sessions": 8,
+  "bgp_established": 7,
   "effective_prefixes": 140,
   "local_asn": 65500
 }
 ```
+
+### ASN Whitelist
+
+```http
+GET    /api/v1/whitelist
+POST   /api/v1/whitelist                  {"asn": 7713, "name": "ISP"}
+DELETE /api/v1/whitelist/:id
+PUT    /api/v1/whitelist/:id/toggle       {"enabled": true}
+PUT    /api/v1/whitelist/auto-accept      {"enabled": true}
+POST   /api/v1/whitelist/import           # import daftar ASN Indonesia (APNIC)
+```
+
+### BGP Monitoring
+
+```http
+GET /api/v1/bgp       # ringkasan + daftar sesi dari semua agent
+GET /metrics          # format Prometheus (publik, tanpa auth)
+```
+
+Metrik yang tersedia: `rtbhid_bgp_agents`, `rtbhid_bgp_sessions_total`,
+`rtbhid_bgp_sessions_established`, `rtbhid_bgp_prefixes_received`,
+`rtbhid_agent_bgp_sessions{agent,engine}`,
+`rtbhid_agent_bgp_sessions_established{agent,engine}`,
+`rtbhid_agent_bgp_prefixes_received{agent,engine}`, dan
+`rtbhid_bgp_session_up{agent,peer,remote_as,passive}`.
 
 ### Prefixes
 

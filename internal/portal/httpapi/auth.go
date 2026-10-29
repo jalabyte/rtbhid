@@ -174,7 +174,7 @@ func hmacSHA256Hex(secret []byte, payload string) string {
 
 func isPublicPath(path string) bool {
 	switch path {
-	case "/login", "/docs", "/api/v1/health", "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/me":
+	case "/login", "/docs", "/api/v1/health", "/metrics", "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/me":
 		return true
 	default:
 		return false

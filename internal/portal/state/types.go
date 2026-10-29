@@ -61,6 +61,34 @@ type Event struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// WhitelistASN is an ASN allowed to auto-peer with RTBHID agents over BGP.
+type WhitelistASN struct {
+	ID        string    `json:"id"`
+	ASN       uint32    `json:"asn"`
+	Name      string    `json:"name"`
+	Country   string    `json:"country"`
+	Source    string    `json:"source"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// BGPSession is a live BGP session reported by an agent.
+type BGPSession struct {
+	AgentID    string    `json:"agent_id"`
+	AgentName  string    `json:"agent_name,omitempty"`
+	Peer       string    `json:"peer"`
+	Name       string    `json:"name"`
+	RemoteAS   uint32    `json:"remote_as"`
+	LocalAS    uint32    `json:"local_as"`
+	State      string    `json:"state"`
+	Passive    bool      `json:"passive"`
+	UptimeSec  int64     `json:"uptime_sec"`
+	PrefixesIn int       `json:"prefixes_in"`
+	LastError  string    `json:"last_error"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// LookupMatch represents a single lookup hit.
 type LookupMatch struct {
 	Type       string    `json:"type"`
 	SourceID   string    `json:"source_id"`

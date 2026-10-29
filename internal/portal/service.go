@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,11 @@ type Service struct {
 	localASN  int
 	tickSec   int
 	asnLookup *ASNLookup
+	idASNs    *IDASNRegistry
+
+	// autoAccept controls whether agents accept inbound BGP sessions from
+	// whitelisted ASNs.
+	autoAccept bool
 
 	// Agent config streams: agentID -> channel
 	mu      sync.RWMutex
@@ -30,13 +36,35 @@ type Service struct {
 
 func NewService(store *state.Store, fetcher *syncer.Fetcher, localASN int, tickSec int, ipinfoToken string) *Service {
 	return &Service{
-		store:     store,
-		fetcher:   fetcher,
-		localASN:  localASN,
-		tickSec:   tickSec,
-		asnLookup: NewASNLookup(ipinfoToken),
-		streams:   make(map[string]chan *pb.ConfigUpdate),
+		store:      store,
+		fetcher:    fetcher,
+		localASN:   localASN,
+		tickSec:    tickSec,
+		asnLookup:  NewASNLookup(ipinfoToken),
+		idASNs:     NewIDASNRegistry(""),
+		autoAccept: true,
+		streams:    make(map[string]chan *pb.ConfigUpdate),
 	}
+}
+
+// SetAutoAccept enables or disables agent auto-accept of whitelisted ASNs.
+func (s *Service) SetAutoAccept(enabled bool) {
+	s.mu.Lock()
+	s.autoAccept = enabled
+	s.mu.Unlock()
+	s.PushConfigToAll()
+}
+
+// AutoAcceptEnabled reports the current auto-accept policy.
+func (s *Service) AutoAcceptEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.autoAccept
+}
+
+// SetIDASNSourceURL overrides the APNIC registry URL.
+func (s *Service) SetIDASNSourceURL(url string) {
+	s.idASNs = NewIDASNRegistry(url)
 }
 
 // Start begins the source sync scheduler goroutine.
@@ -115,6 +143,7 @@ func (s *Service) buildConfigUpdate() *pb.ConfigUpdate {
 	s.mu.Lock()
 	s.version++
 	ver := s.version
+	autoAccept := s.autoAccept
 	s.mu.Unlock()
 
 	prefixes := s.store.EffectivePrefixes()
@@ -139,9 +168,11 @@ func (s *Service) buildConfigUpdate() *pb.ConfigUpdate {
 	}
 
 	return &pb.ConfigUpdate{
-		Prefixes: prefixes,
-		Peers:    peers,
-		Version:  ver,
+		Prefixes:    prefixes,
+		Peers:       peers,
+		Version:     ver,
+		AllowedAsns: s.store.ListEnabledWhitelistASNs(),
+		AutoAccept:  autoAccept,
 	}
 }
 
@@ -264,6 +295,89 @@ func (s *Service) TogglePeer(id string, enabled bool) error {
 	_ = s.store.AddEvent("peer.toggle", fmt.Sprintf("toggled peer id=%s enabled=%v", id, enabled), "")
 	s.PushConfigToAll()
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// ASN whitelist (auto-accept peers)
+// ---------------------------------------------------------------------------
+
+func (s *Service) ListWhitelistASNs() []state.WhitelistASN {
+	return s.store.ListWhitelistASNs()
+}
+
+func (s *Service) GetWhitelistCount() int {
+	return s.store.CountWhitelistASNs()
+}
+
+func (s *Service) AddWhitelistASN(asn uint32, name string) (state.WhitelistASN, error) {
+	if asn == 0 {
+		return state.WhitelistASN{}, fmt.Errorf("asn must be greater than zero")
+	}
+	if _, exists := s.store.GetWhitelistASN(asn); exists {
+		return state.WhitelistASN{}, fmt.Errorf("AS%d is already whitelisted", asn)
+	}
+	entry := state.WhitelistASN{
+		ID:      newResourceID("asn"),
+		ASN:     asn,
+		Name:    name,
+		Country: "ID",
+		Source:  "manual",
+		Enabled: true,
+	}
+	created, err := s.store.CreateWhitelistASN(entry)
+	if err != nil {
+		return state.WhitelistASN{}, err
+	}
+	_ = s.store.AddEvent("whitelist.create", fmt.Sprintf("whitelisted AS%d", asn), "")
+	s.PushConfigToAll()
+	return created, nil
+}
+
+func (s *Service) DeleteWhitelistASN(id string) error {
+	if err := s.store.DeleteWhitelistASN(id); err != nil {
+		return err
+	}
+	_ = s.store.AddEvent("whitelist.delete", fmt.Sprintf("removed whitelist entry %s", id), "")
+	s.PushConfigToAll()
+	return nil
+}
+
+func (s *Service) ToggleWhitelistASN(id string, enabled bool) error {
+	if err := s.store.ToggleWhitelistASN(id, enabled); err != nil {
+		return err
+	}
+	_ = s.store.AddEvent("whitelist.toggle", fmt.Sprintf("toggled whitelist entry %s enabled=%v", id, enabled), "")
+	s.PushConfigToAll()
+	return nil
+}
+
+// ImportIndonesianASNs downloads the APNIC delegation file and replaces the
+// APNIC-sourced portion of the whitelist with all Indonesian ASNs. Manual
+// entries are preserved.
+func (s *Service) ImportIndonesianASNs(ctx context.Context) (created int, total int, err error) {
+	asns, err := s.idASNs.Fetch(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	now := time.Now().UTC()
+	entries := make([]state.WhitelistASN, 0, len(asns))
+	for _, asn := range asns {
+		entries = append(entries, state.WhitelistASN{
+			ID:        newResourceID("asn"),
+			ASN:       asn,
+			Country:   "ID",
+			Source:    "apnic",
+			Enabled:   true,
+			CreatedAt: now,
+		})
+	}
+	created, err = s.store.ReplaceWhitelistBySource("apnic", entries)
+	if err != nil {
+		return created, len(asns), err
+	}
+	_ = s.store.AddEvent("whitelist.import", fmt.Sprintf("imported %d Indonesian ASNs (requested %d)", created, len(asns)), "")
+	s.PushConfigToAll()
+	return created, len(asns), nil
 }
 
 func (s *Service) CreateSource(src state.Source) error {
@@ -550,8 +664,50 @@ func (s *Service) syncDueSources() {
 // ---------------------------------------------------------------------------
 
 // HandleHeartbeat updates agent heartbeat in store.
-func (s *Service) HandleHeartbeat(agentID string, prefixCount, peerCount int, birdStatus string) {
+func (s *Service) HandleHeartbeat(agentID string, prefixCount, peerCount int, birdStatus, engine string, sessions []state.BGPSession) {
 	_ = s.store.UpdateAgentHeartbeat(agentID, birdStatus, prefixCount, peerCount)
+	if err := s.store.ReplaceAgentBGPSessions(agentID, engine, sessions); err != nil {
+		log.Printf("store BGP sessions for agent %s: %v", agentID, err)
+	}
+}
+
+// BGPOverview summarises live BGP sessions reported by all agents.
+type BGPOverview struct {
+	Agents      int                `json:"agents"`
+	Sessions    int                `json:"sessions"`
+	Established int                `json:"established"`
+	PrefixesIn  int                `json:"prefixes_in"`
+	Engines     map[string]string  `json:"engines"`
+	Items       []state.BGPSession `json:"items"`
+}
+
+func (s *Service) BGPOverview() BGPOverview {
+	sessions := s.store.ListAgentBGPSessions()
+	engines := s.store.AgentBGPEngines()
+	overview := BGPOverview{
+		Engines:  engines,
+		Items:    sessions,
+		Sessions: len(sessions),
+	}
+	agents := make(map[string]struct{})
+	for _, sess := range sessions {
+		agents[sess.AgentID] = struct{}{}
+		if strings.EqualFold(sess.State, "established") {
+			overview.Established++
+			overview.PrefixesIn += sess.PrefixesIn
+		}
+	}
+	for id := range engines {
+		agents[id] = struct{}{}
+	}
+	overview.Agents = len(agents)
+	if overview.Items == nil {
+		overview.Items = []state.BGPSession{}
+	}
+	if overview.Engines == nil {
+		overview.Engines = map[string]string{}
+	}
+	return overview
 }
 
 // HandleRegister registers an agent in the store.

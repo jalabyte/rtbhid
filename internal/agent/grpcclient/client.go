@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	pb "rtbhid/gen/rtbhid"
 	"rtbhid/internal/agent/bird"
+	"rtbhid/internal/agent/engine"
 )
 
 // Config holds the agent gRPC client configuration.
@@ -35,36 +37,76 @@ type Config struct {
 	ExportStdComms    string
 	ExportLargeComms  string
 
+	// BGPEngine selects the routing implementation: "bird" (default) or
+	// "custom" (embedded BGP server).
+	BGPEngine      string
+	BGPListenAddr  string
+	BGPRouterID    string
+	BGPNexthopV4   string
+	BGPNexthopV6   string
+	BGPHoldTimeSec int
+	BGPEnableIPv6  bool
+	BGPMaxPrefixes int
+	BGPMaxDynamic  int
+
 	// GRPCMaxRecvMsgSize is the maximum message size in bytes the client
 	// will accept. If 0, uses gRPC default (4MB).
 	GRPCMaxRecvMsgSize int
 }
 
-// Client connects to the portal and manages Bird config locally.
+// Client connects to the portal and manages routing state locally.
 type Client struct {
 	cfg        Config
 	conn       *grpc.ClientConn
 	portal     pb.PortalClient
-	birdMgr    *bird.Manager
+	engine     engine.Engine
 	mu         sync.Mutex
 	lastConfig *pb.ConfigUpdate
 }
 
-// New creates a new gRPC agent client.
-func New(cfg Config) *Client {
-	exportPolicy, _ := bird.ParseExportPolicy(cfg.ExportStdComms, cfg.ExportLargeComms)
-	birdMgr := bird.NewManager(
-		cfg.BirdOutputPath,
-		cfg.BirdPeersOutput,
-		cfg.BirdReloadEnabled,
-		cfg.BirdCommand,
-		exportPolicy,
-	)
-	return &Client{cfg: cfg, birdMgr: birdMgr}
+// New creates a new gRPC agent client and starts the configured BGP engine.
+func New(cfg Config) (*Client, error) {
+	var eng engine.Engine
+	switch strings.ToLower(strings.TrimSpace(cfg.BGPEngine)) {
+	case "", "bird":
+		exportPolicy, _ := bird.ParseExportPolicy(cfg.ExportStdComms, cfg.ExportLargeComms)
+		birdMgr := bird.NewManager(
+			cfg.BirdOutputPath,
+			cfg.BirdPeersOutput,
+			cfg.BirdReloadEnabled,
+			cfg.BirdCommand,
+			exportPolicy,
+		)
+		eng = engine.NewBird(birdMgr, cfg.LocalASN)
+	case "custom", "embedded":
+		custom, err := engine.NewCustom(engine.CustomConfig{
+			LocalASN:         cfg.LocalASN,
+			ListenAddr:       cfg.BGPListenAddr,
+			RouterID:         cfg.BGPRouterID,
+			NexthopV4:        cfg.BGPNexthopV4,
+			NexthopV6:        cfg.BGPNexthopV6,
+			HoldTimeSec:      cfg.BGPHoldTimeSec,
+			EnableIPv6:       cfg.BGPEnableIPv6,
+			MaxPrefixes:      cfg.BGPMaxPrefixes,
+			MaxDynamic:       cfg.BGPMaxDynamic,
+			ExportStdComms:   cfg.ExportStdComms,
+			ExportLargeComms: cfg.ExportLargeComms,
+			Logger:           log.Default(),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("start custom BGP engine: %w", err)
+		}
+		eng = custom
+	default:
+		return nil, fmt.Errorf("unknown RTBH_BGP_ENGINE %q (expected bird or custom)", cfg.BGPEngine)
+	}
+	return &Client{cfg: cfg, engine: eng}, nil
 }
 
 // Run is the main agent loop: register, heartbeat, config stream.
 func (c *Client) Run(ctx context.Context) error {
+	defer c.engine.Close()
+
 	agentID, err := c.loadOrGenerateID()
 	if err != nil {
 		return fmt.Errorf("load agent ID: %w", err)
@@ -107,6 +149,10 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 func (c *Client) heartbeatLoop(ctx context.Context, interval time.Duration) {
+	// Report once immediately so the portal has data without waiting a full
+	// interval.
+	c.sendHeartbeat(ctx)
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -115,25 +161,54 @@ func (c *Client) heartbeatLoop(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			c.mu.Lock()
-			prefixCount := 0
-			peerCount := 0
-			if c.lastConfig != nil {
-				prefixCount = len(c.lastConfig.Prefixes)
-				peerCount = len(c.lastConfig.Peers)
-			}
-			c.mu.Unlock()
-
-			_, err := c.portal.Heartbeat(ctx, &pb.HeartbeatRequest{
-				AgentId:     c.cfg.AgentID,
-				PrefixCount: int32(prefixCount),
-				PeerCount:   int32(peerCount),
-				BirdStatus:  "running",
-			})
-			if err != nil {
-				log.Printf("heartbeat error: %v", err)
-			}
+			c.sendHeartbeat(ctx)
 		}
+	}
+}
+
+func (c *Client) sendHeartbeat(ctx context.Context) {
+	c.mu.Lock()
+	prefixCount := 0
+	peerCount := 0
+	if c.lastConfig != nil {
+		prefixCount = len(c.lastConfig.Prefixes)
+		peerCount = len(c.lastConfig.Peers)
+	}
+	c.mu.Unlock()
+
+	engineName := c.cfg.BGPEngine
+	var sessions []*pb.BgpSession
+	if reporter, ok := c.engine.(engine.Reporter); ok {
+		name, list := reporter.BGPStatus()
+		if name != "" {
+			engineName = name
+		}
+		sessions = make([]*pb.BgpSession, 0, len(list))
+		for _, s := range list {
+			sessions = append(sessions, &pb.BgpSession{
+				Peer:       s.Peer,
+				Name:       s.Name,
+				RemoteAs:   s.RemoteAS,
+				LocalAs:    s.LocalAS,
+				State:      s.State,
+				Passive:    s.Passive,
+				UptimeSec:  s.UptimeSec,
+				PrefixesIn: int32(s.PrefixesIn),
+				LastError:  s.LastError,
+			})
+		}
+	}
+
+	_, err := c.portal.Heartbeat(ctx, &pb.HeartbeatRequest{
+		AgentId:     c.cfg.AgentID,
+		PrefixCount: int32(prefixCount),
+		PeerCount:   int32(peerCount),
+		BirdStatus:  "running",
+		BgpSessions: sessions,
+		BgpEngine:   engineName,
+	})
+	if err != nil {
+		log.Printf("heartbeat error: %v", err)
 	}
 }
 
@@ -181,8 +256,8 @@ func (c *Client) applyConfig(update *pb.ConfigUpdate) {
 	c.lastConfig = update
 	c.mu.Unlock()
 
-	log.Printf("applying config version %d: %d prefixes, %d peers",
-		update.Version, len(update.Prefixes), len(update.Peers))
+	log.Printf("applying config version %d: %d prefixes, %d peers, %d whitelisted ASNs (auto_accept=%v)",
+		update.Version, len(update.Prefixes), len(update.Peers), len(update.AllowedAsns), update.AutoAccept)
 
 	peers := make([]bird.Peer, 0, len(update.Peers))
 	for _, p := range update.Peers {
@@ -196,12 +271,12 @@ func (c *Client) applyConfig(update *pb.ConfigUpdate) {
 		})
 	}
 
-	result, err := c.birdMgr.Apply(update.Prefixes, peers, c.cfg.LocalASN)
+	result, err := c.engine.Apply(update.Prefixes, peers, update.AllowedAsns, update.AutoAccept)
 	if err != nil {
-		log.Printf("bird apply error: %v", err)
+		log.Printf("apply error: %v", err)
 		return
 	}
-	log.Printf("bird config applied: %d routes, %d peers, reload=%v",
+	log.Printf("config applied: %d routes, %d peers, reload=%v",
 		result.RouteCount, result.PeerCount, result.ReloadRan)
 }
 

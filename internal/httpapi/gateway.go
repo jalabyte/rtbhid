@@ -102,13 +102,14 @@ func (g *Gateway) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		BirdStatus  string `json:"bird_status"`
 		PrefixCount int    `json:"prefix_count"`
 		PeerCount   int    `json:"peer_count"`
+		BGPEngine   string `json:"bgp_engine"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 
-	g.svc.HandleHeartbeat(agentID, req.PrefixCount, req.PeerCount, req.BirdStatus)
+	g.svc.HandleHeartbeat(agentID, req.PrefixCount, req.PeerCount, req.BirdStatus, req.BGPEngine, nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})

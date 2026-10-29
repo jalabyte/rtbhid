@@ -9,6 +9,8 @@ import SourcePrefixes from "./pages/SourcePrefixes";
 import Excludes from "./pages/Excludes";
 import ExcludeSourcePrefixes from "./pages/ExcludeSourcePrefixes";
 import Peers from "./pages/Peers";
+import Whitelist from "./pages/Whitelist";
+import BGPMonitor from "./pages/BGPMonitor";
 import Events from "./pages/Events";
 import Docs from "./pages/Docs";
 import Lookup from "./pages/Lookup";
@@ -29,6 +31,8 @@ export default function App() {
             <Route path="/excludes" element={<Excludes />} />
             <Route path="/exclude-prefixes" element={<ExcludeSourcePrefixes />} />
             <Route path="/peers" element={<Peers />} />
+            <Route path="/whitelist" element={<Whitelist />} />
+            <Route path="/bgp" element={<BGPMonitor />} />
             <Route path="/events" element={<Events />} />
             <Route path="/lookup" element={<Lookup />} />
             <Route path="/docs" element={<Docs />} />

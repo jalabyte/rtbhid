@@ -663,6 +663,260 @@ func (s *Store) TogglePeer(id string, enabled bool) error {
 }
 
 // --------------------------------------------------------------------------
+// ASN whitelist CRUD
+// --------------------------------------------------------------------------
+
+func (s *Store) ListWhitelistASNs() []WhitelistASN {
+	rows, err := s.db.Query(`
+		SELECT id, asn, COALESCE(name, ''), COALESCE(country, ''), COALESCE(source, ''), enabled, created_at
+		FROM asn_whitelist ORDER BY asn`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var out []WhitelistASN
+	for rows.Next() {
+		var w WhitelistASN
+		if err := rows.Scan(&w.ID, &w.ASN, &w.Name, &w.Country, &w.Source, &w.Enabled, &w.CreatedAt); err != nil {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// ListEnabledWhitelistASNs returns the ASNs pushed to agents for auto-accept.
+func (s *Store) ListEnabledWhitelistASNs() []uint32 {
+	rows, err := s.db.Query(`SELECT asn FROM asn_whitelist WHERE enabled = 1 ORDER BY asn`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var out []uint32
+	for rows.Next() {
+		var asn uint32
+		if err := rows.Scan(&asn); err == nil {
+			out = append(out, asn)
+		}
+	}
+	return out
+}
+
+func (s *Store) GetWhitelistASN(asn uint32) (WhitelistASN, bool) {
+	var w WhitelistASN
+	err := s.db.QueryRow(`
+		SELECT id, asn, COALESCE(name, ''), COALESCE(country, ''), COALESCE(source, ''), enabled, created_at
+		FROM asn_whitelist WHERE asn = ?`, asn).
+		Scan(&w.ID, &w.ASN, &w.Name, &w.Country, &w.Source, &w.Enabled, &w.CreatedAt)
+	if err != nil {
+		return WhitelistASN{}, false
+	}
+	return w, true
+}
+
+func (s *Store) CreateWhitelistASN(w WhitelistASN) (WhitelistASN, error) {
+	if w.CreatedAt.IsZero() {
+		w.CreatedAt = time.Now().UTC()
+	}
+	if w.Country == "" {
+		w.Country = "ID"
+	}
+	if w.Source == "" {
+		w.Source = "manual"
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO asn_whitelist (id, asn, name, country, source, enabled, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.ASN, w.Name, w.Country, w.Source, w.Enabled, w.CreatedAt,
+	)
+	if err != nil {
+		return WhitelistASN{}, err
+	}
+	return w, nil
+}
+
+// UpsertWhitelistASN inserts the entry when the ASN is not present. It never
+// changes an existing entry's enabled state. The boolean reports whether a new
+// row was created.
+func (s *Store) UpsertWhitelistASN(w WhitelistASN) (bool, error) {
+	if w.CreatedAt.IsZero() {
+		w.CreatedAt = time.Now().UTC()
+	}
+	if w.Country == "" {
+		w.Country = "ID"
+	}
+	if w.Source == "" {
+		w.Source = "apnic"
+	}
+	res, err := s.db.Exec(`
+		INSERT OR IGNORE INTO asn_whitelist (id, asn, name, country, source, enabled, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.ASN, w.Name, w.Country, w.Source, w.Enabled, w.CreatedAt,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+func (s *Store) DeleteWhitelistASN(id string) error {
+	res, err := s.db.Exec(`DELETE FROM asn_whitelist WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("whitelist entry %q not found", id)
+	}
+	return nil
+}
+
+func (s *Store) DeleteWhitelistASNByASN(asn uint32) error {
+	_, err := s.db.Exec(`DELETE FROM asn_whitelist WHERE asn = ?`, asn)
+	return err
+}
+
+func (s *Store) ToggleWhitelistASN(id string, enabled bool) error {
+	res, err := s.db.Exec(`UPDATE asn_whitelist SET enabled = ? WHERE id = ?`, enabled, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("whitelist entry %q not found", id)
+	}
+	return nil
+}
+
+// ReplaceWhitelistBySource removes entries from the given source and inserts
+// the supplied entries. Manual entries are never touched.
+func (s *Store) ReplaceWhitelistBySource(source string, entries []WhitelistASN) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`DELETE FROM asn_whitelist WHERE source = ?`, source); err != nil {
+		return 0, err
+	}
+	created := 0
+	for _, w := range entries {
+		if w.CreatedAt.IsZero() {
+			w.CreatedAt = time.Now().UTC()
+		}
+		if w.Country == "" {
+			w.Country = "ID"
+		}
+		if w.Source == "" {
+			w.Source = source
+		}
+		res, err := tx.Exec(`
+			INSERT OR IGNORE INTO asn_whitelist (id, asn, name, country, source, enabled, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			w.ID, w.ASN, w.Name, w.Country, w.Source, w.Enabled, w.CreatedAt,
+		)
+		if err != nil {
+			return created, err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			created++
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return created, err
+	}
+	return created, nil
+}
+
+func (s *Store) CountWhitelistASNs() int {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM asn_whitelist`).Scan(&n)
+	return n
+}
+
+// --------------------------------------------------------------------------
+// BGP telemetry
+// --------------------------------------------------------------------------
+
+// ReplaceAgentBGPSessions atomically replaces the reported sessions for an
+// agent and records the engine name.
+func (s *Store) ReplaceAgentBGPSessions(agentID, engine string, sessions []BGPSession) error {
+	now := time.Now().UTC()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`
+		INSERT INTO agent_bgp_status (agent_id, engine, updated_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(agent_id) DO UPDATE SET engine = excluded.engine, updated_at = excluded.updated_at`,
+		agentID, engine, now); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM agent_bgp_sessions WHERE agent_id = ?`, agentID); err != nil {
+		return err
+	}
+	for _, sess := range sessions {
+		if sess.Peer == "" {
+			continue
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO agent_bgp_sessions (agent_id, peer, name, remote_as, local_as, state, passive, uptime_sec, prefixes_in, last_error, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			agentID, sess.Peer, sess.Name, sess.RemoteAS, sess.LocalAS, sess.State,
+			sess.Passive, sess.UptimeSec, sess.PrefixesIn, sess.LastError, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListAgentBGPSessions() []BGPSession {
+	rows, err := s.db.Query(`
+		SELECT b.agent_id, COALESCE(a.name, ''), b.peer, COALESCE(b.name, ''), b.remote_as, b.local_as,
+		       COALESCE(b.state, ''), b.passive, b.uptime_sec, b.prefixes_in, COALESCE(b.last_error, ''), b.updated_at
+		FROM agent_bgp_sessions b
+		LEFT JOIN agents a ON a.id = b.agent_id
+		ORDER BY a.name, b.peer`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var out []BGPSession
+	for rows.Next() {
+		var sess BGPSession
+		if err := rows.Scan(&sess.AgentID, &sess.AgentName, &sess.Peer, &sess.Name, &sess.RemoteAS, &sess.LocalAS,
+			&sess.State, &sess.Passive, &sess.UptimeSec, &sess.PrefixesIn, &sess.LastError, &sess.UpdatedAt); err != nil {
+			continue
+		}
+		out = append(out, sess)
+	}
+	return out
+}
+
+// AgentBGPEngines returns agentID -> engine name and last report time.
+func (s *Store) AgentBGPEngines() map[string]string {
+	rows, err := s.db.Query(`SELECT agent_id, COALESCE(engine, '') FROM agent_bgp_status`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var id, engine string
+		if err := rows.Scan(&id, &engine); err == nil {
+			out[id] = engine
+		}
+	}
+	return out
+}
+
+// --------------------------------------------------------------------------
 // Event CRUD
 // --------------------------------------------------------------------------
 

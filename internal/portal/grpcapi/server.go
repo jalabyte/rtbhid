@@ -9,6 +9,7 @@ import (
 
 	pb "rtbhid/gen/rtbhid"
 	"rtbhid/internal/portal"
+	"rtbhid/internal/portal/state"
 
 	"google.golang.org/grpc"
 )
@@ -72,17 +73,33 @@ func (s *Server) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.Reg
 	return &pb.RegisterResponse{
 		Success:           true,
 		Message:           "registered",
-		HeartbeatInterval: 30,
+		HeartbeatInterval: 15,
 	}, nil
 }
 
 // Heartbeat handles agent health reports. It always returns success.
 func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
+	sessions := make([]state.BGPSession, 0, len(req.GetBgpSessions()))
+	for _, sess := range req.GetBgpSessions() {
+		sessions = append(sessions, state.BGPSession{
+			Peer:       sess.GetPeer(),
+			Name:       sess.GetName(),
+			RemoteAS:   sess.GetRemoteAs(),
+			LocalAS:    sess.GetLocalAs(),
+			State:      sess.GetState(),
+			Passive:    sess.GetPassive(),
+			UptimeSec:  sess.GetUptimeSec(),
+			PrefixesIn: int(sess.GetPrefixesIn()),
+			LastError:  sess.GetLastError(),
+		})
+	}
 	s.svc.HandleHeartbeat(
 		req.GetAgentId(),
 		int(req.GetPrefixCount()),
 		int(req.GetPeerCount()),
 		req.GetBirdStatus(),
+		req.GetBgpEngine(),
+		sessions,
 	)
 
 	return &pb.HeartbeatResponse{
