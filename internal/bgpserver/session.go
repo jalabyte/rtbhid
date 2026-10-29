@@ -209,8 +209,8 @@ func (s *Server) runSession(sess *session) {
 	if sess.passive && sess.static == nil {
 		if !s.allowRemoteASN(remoteAS) {
 			_ = sess.send(encodeNotification(notifOpenMessage, openBadPeerAS, nil))
-			sess.setErr(fmt.Errorf("AS%d is not in the allowlist", remoteAS))
-			s.log.Printf("bgpserver: rejected inbound peer %s AS%d: not in allowlist", sess.remoteIP(), remoteAS)
+			sess.setErr(fmt.Errorf("AS%d rejected: auto-accept disabled or ASN not in allowlist", remoteAS))
+			s.log.Printf("bgpserver: rejected inbound peer %s AS%d: auto-accept disabled or ASN not in allowlist", sess.remoteIP(), remoteAS)
 			return
 		}
 	}
