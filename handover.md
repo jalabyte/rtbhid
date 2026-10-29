@@ -135,6 +135,11 @@ npm run dev         # Vite dev server (proxies API to :8088)
 | `RTBH_DB_PATH` | `./data/portal.db` | SQLite database path |
 | `RTBH_LOCAL_ASN` | `65500` | Local AS number |
 | `RTBH_SCHEDULER_TICK_SECONDS` | `15` | Source sync interval check |
+| `RTBH_BGP_AUTO_ACCEPT` | `true` | Allow agents to auto-accept whitelisted ASNs |
+| `RTBH_WHITELIST_STRICT_ID` | `true` | Require manual ASN adds to exist in the RIR country-ID registry |
+| `RTBH_ID_ASN_SOURCE_URL` | all RIRs | Override one Indonesian ASN source URL |
+| `RTBH_ID_ASN_SOURCE_URLS` | all RIRs | Comma-separated source URL list |
+| `RTBH_METRICS_TOKEN` | *(public)* | Optional bearer token for `/metrics` |
 | `RTBH_AUTH_USER` | *(disabled)* | Auth username (enables auth) |
 | `RTBH_AUTH_PASS` | *(disabled)* | Auth password |
 | `RTBH_AUTH_SESSION_SECRET` | | HMAC-SHA256 session signing key |
@@ -230,7 +235,7 @@ All under `/api/v1/` (except auth/login). Full list from `server.go`:
 | PUT | `/whitelist/:id/toggle` | Enable/disable an entry |
 | PUT | `/whitelist/auto-accept` | Toggle agent auto-accept |
 | POST | `/whitelist/import` | Import Indonesian ASNs from all RIRs |
-| GET | `/metrics` | Prometheus metrics (public, no auth) |
+| GET | `/metrics` | Prometheus metrics (public unless `RTBH_METRICS_TOKEN` is set) |
 | POST | `/register` | Agent registration |
 | POST | `/heartbeat` | Agent heartbeat |
 | GET | `/config?agentID=X` | Long-poll config updates |

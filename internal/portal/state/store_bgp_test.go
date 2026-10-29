@@ -37,4 +37,14 @@ func TestAgentBGPSessions(t *testing.T) {
 	if got := store.ListAgentBGPSessions(); len(got) != 1 {
 		t.Fatalf("expected stale session removed, got %d", len(got))
 	}
+
+	if err := store.DeleteAgent("agent-1"); err != nil {
+		t.Fatalf("delete agent: %v", err)
+	}
+	if got := store.ListAgentBGPSessions(); len(got) != 0 {
+		t.Fatalf("expected telemetry cleared with agent, got %+v", got)
+	}
+	if _, ok := store.AgentBGPEngines()["agent-1"]; ok {
+		t.Fatal("expected BGP engine status cleared with agent")
+	}
 }

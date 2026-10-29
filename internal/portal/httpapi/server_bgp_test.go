@@ -53,4 +53,21 @@ func TestBGPOverviewAndMetrics(t *testing.T) {
 			t.Fatalf("metrics missing %q:\n%s", want, body)
 		}
 	}
+
+	// Optional bearer token protection.
+	server.SetMetricsToken("test-token")
+	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token, got %d", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 with token, got %d", rr.Code)
+	}
 }

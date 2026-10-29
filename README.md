@@ -415,6 +415,7 @@ RTBH_BIRD_COMMAND='birdc -s /var/run/bird/bird.ctl configure' \
 | `RTBH_WHITELIST_STRICT_ID` | `true` | Tolak manual add ASN yang tidak ada di registry country-ID RIR |
 | `RTBH_ID_ASN_SOURCE_URL` | semua RIR | Override satu URL sumber daftar ASN Indonesia |
 | `RTBH_ID_ASN_SOURCE_URLS` | semua RIR | Override daftar URL (dipisah koma) sumber ASN Indonesia |
+| `RTBH_METRICS_TOKEN` | *(public)* | Wajibkan `Authorization: Bearer <token>` atau `?token=` untuk `/metrics` |
 | `RTBH_AUTH_USER` | *(disabled)* | Auth username |
 | `RTBH_AUTH_PASS` | *(disabled)* | Auth password |
 | `RTBH_AUTH_SESSION_SECRET` | *(random)* | Session signing key |
@@ -479,6 +480,18 @@ Catatan deployment:
    port 179.
 3. Telemetri sesi dikirim lewat heartbeat gRPC tiap 15 detik.
 
+Batasan keamanan engine custom:
+
+1. **ASN pada OPEN belum diverifikasi kriptografis.** Auto-accept memakai ASN
+   yang diklaim peer. Gunakan firewall/allowlist IP, IRR/RPKI filtering, atau
+   pertimbangkan MD5/GTSM jika lingkungan tidak tepercaya.
+2. **TCP MD5 dan GTSM belum didukung.** Field password peer diabaikan (agent
+   menulis warning di log). Untuk peer yang mewajibkan MD5/TTL security,
+   gunakan engine `bird`.
+3. **Multihop** tidak mengubah TTL; session tetap mengikuti routing sistem.
+   Untuk TTL security eksplisit gunakan BIRD.
+4. Batasi akses TCP/179 ke jaringan peering yang sah.
+
 ```bash
 RTBH_MODE=agent
 RTBH_PORTAL_URL=portal.example.com:50051
@@ -542,7 +555,7 @@ POST   /api/v1/whitelist/import           # import daftar ASN Indonesia (APNIC)
 
 ```http
 GET /api/v1/bgp       # ringkasan + daftar sesi dari semua agent
-GET /metrics          # format Prometheus (publik, tanpa auth)
+GET /metrics          # format Prometheus (publik kecuali RTBH_METRICS_TOKEN di-set)
 ```
 
 Metrik yang tersedia: `rtbhid_bgp_agents`, `rtbhid_bgp_sessions_total`,

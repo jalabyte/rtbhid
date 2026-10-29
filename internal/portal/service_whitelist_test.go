@@ -37,6 +37,10 @@ func TestStrictIDWhitelistValidation(t *testing.T) {
 		t.Fatalf("expected country ID, got %+v", entry)
 	}
 
+	if _, err := svc.AddWhitelistASN(7713, "dup", false); err == nil {
+		t.Fatal("expected duplicate ASN to be rejected")
+	}
+
 	if _, err := svc.AddWhitelistASN(65002, "", false); err == nil {
 		t.Fatal("expected non-ID ASN to be rejected in strict mode")
 	}

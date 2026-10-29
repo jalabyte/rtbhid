@@ -35,6 +35,7 @@ func main() {
 	strictID := getEnvBool("RTBH_WHITELIST_STRICT_ID", true)
 	idASNURL := getEnv("RTBH_ID_ASN_SOURCE_URL", "")
 	idASNURLs := splitList(getEnv("RTBH_ID_ASN_SOURCE_URLS", ""))
+	metricsToken := getEnv("RTBH_METRICS_TOKEN", "")
 
 	authCfg := httpapi.AuthConfig{
 		Enabled:       os.Getenv("RTBH_AUTH_USER") != "",
@@ -83,6 +84,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("init http server: %v", err)
 	}
+	httpServer.SetMetricsToken(metricsToken)
 	srv := &http.Server{
 		Addr:              listenAddr,
 		Handler:           httpServer.Handler(),
@@ -101,6 +103,11 @@ func main() {
 	fmt.Printf("portal gRPC max msg size: %d bytes\n", grpcMaxMsgSize)
 	fmt.Printf("database: %s\n", dbPath)
 	fmt.Printf("local ASN: %d\n", localASN)
+	if metricsToken != "" {
+		fmt.Printf("/metrics authentication: bearer token enabled\n")
+	} else {
+		fmt.Printf("/metrics authentication: disabled (set RTBH_METRICS_TOKEN to enable)\n")
+	}
 	if ipinfoToken != "" {
 		fmt.Printf("ipinfo.io ASN lookup: enabled\n")
 	} else {

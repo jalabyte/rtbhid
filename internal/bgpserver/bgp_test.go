@@ -335,6 +335,81 @@ func TestSetPeersRemovalStopsSession(t *testing.T) {
 	}
 }
 
+func TestIBGPSessionAttributes(t *testing.T) {
+	srv := startTestServer(t, testConfig(65000))
+	srv.SetRoutes([]string{"10.9.0.0/16"})
+	srv.SetAllowlist([]uint32{65000}, true)
+
+	conn, notifs := testPeer(t, srv.Addr(), 65000, false)
+	if len(notifs) == 1 {
+		t.Fatal("iBGP peer was unexpectedly rejected")
+	}
+	sets := readUpdates(t, conn, 1, 3*time.Second)
+	if len(sets) == 0 {
+		t.Fatal("expected iBGP route announcement")
+	}
+	u := sets[0].update
+	if u.ASPathLen != 0 {
+		t.Fatalf("iBGP announcement must not prepend AS_PATH, got %d", u.ASPathLen)
+	}
+	if u.LocalPref != 100 {
+		t.Fatalf("expected LOCAL_PREF 100, got %d", u.LocalPref)
+	}
+}
+
+func TestSetPeersConfigChangeStopsOldSession(t *testing.T) {
+	peerServer := startTestServer(t, testConfig(65000))
+	peerServer.SetAllowlist([]uint32{65010}, true)
+
+	dialer := startTestServer(t, testConfig(65010))
+	host, port, err := net.SplitHostPort(peerServer.Addr())
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+	var portNum int
+	if _, err := fmt.Sscanf(port, "%d", &portNum); err != nil {
+		t.Fatalf("parse port: %v", err)
+	}
+	peer := PeerConfig{
+		Name:     "peer-a",
+		Neighbor: host,
+		Port:     portNum,
+		RemoteAS: 65000,
+		Enabled:  true,
+	}
+	dialer.SetPeers([]PeerConfig{peer})
+
+	waitFor(t, 5*time.Second, func() bool {
+		for _, s := range dialer.Stats() {
+			if s.State == stateEstablished {
+				return true
+			}
+		}
+		return false
+	})
+
+	// Changing the configured remote AS must tear down the live session and
+	// replace it, not leave the old reconnect loop running.
+	peer.RemoteAS = 65011
+	dialer.SetPeers([]PeerConfig{peer})
+
+	waitFor(t, 5*time.Second, func() bool {
+		for _, s := range dialer.Stats() {
+			if s.State == stateEstablished {
+				return false
+			}
+		}
+		for _, s := range peerServer.Stats() {
+			if s.State == stateEstablished {
+				return false
+			}
+		}
+		return true
+	})
+
+	dialer.SetPeers(nil)
+}
+
 // bytesReader adapts a byte slice to io.Reader without importing bytes in the
 // test hot path.
 type byteReader struct {

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"rtbhid/internal/agent/bird"
@@ -80,6 +81,8 @@ type CustomConfig struct {
 type Custom struct {
 	srv      *bgpserver.Server
 	localASN int
+	log      *log.Logger
+	md5Warn  sync.Once
 }
 
 // NewCustom starts the embedded BGP server.
@@ -125,12 +128,21 @@ func NewCustom(cfg CustomConfig) (*Custom, error) {
 	if err := srv.Start(context.Background()); err != nil {
 		return nil, err
 	}
-	return &Custom{srv: srv, localASN: cfg.LocalASN}, nil
+	logger := cfg.Logger
+	if logger == nil {
+		logger = log.Default()
+	}
+	return &Custom{srv: srv, localASN: cfg.LocalASN, log: logger}, nil
 }
 
 func (c *Custom) Apply(prefixes []string, peers []bird.Peer, allowedASNs []uint32, autoAccept bool) (bird.ApplyResult, error) {
 	peerCfg := make([]bgpserver.PeerConfig, 0, len(peers))
 	for _, p := range peers {
+		if strings.TrimSpace(p.Password) != "" {
+			c.md5Warn.Do(func() {
+				c.log.Printf("bgp engine custom: TCP MD5 passwords are not supported; peer %q will connect without MD5", p.Name)
+			})
+		}
 		peerCfg = append(peerCfg, bgpserver.PeerConfig{
 			ID:       p.ID,
 			Name:     p.Name,

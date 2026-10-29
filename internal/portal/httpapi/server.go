@@ -3,6 +3,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -24,9 +25,16 @@ var loginHTML []byte
 
 // Server wraps the portal Service and exposes a REST API for the React dashboard.
 type Server struct {
-	svc       *portal.Service
-	auth      *authManager
-	webAssets fs.FS
+	svc          *portal.Service
+	auth         *authManager
+	webAssets    fs.FS
+	metricsToken string
+}
+
+// SetMetricsToken requires a bearer token (or ?token=) on GET /metrics. An empty
+// token keeps the endpoint public, which is the default for trusted networks.
+func (s *Server) SetMetricsToken(token string) {
+	s.metricsToken = strings.TrimSpace(token)
 }
 
 // NewServer creates a new portal API server. webAssets is the embedded React
@@ -921,6 +929,17 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
 		return
+	}
+	if s.metricsToken != "" {
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if got == "" {
+			got = r.URL.Query().Get("token")
+		}
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.metricsToken)) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeError(w, http.StatusUnauthorized, errors.New("invalid metrics token"))
+			return
+		}
 	}
 	overview := s.svc.BGPOverview()
 
