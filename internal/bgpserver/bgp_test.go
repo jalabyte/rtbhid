@@ -503,6 +503,68 @@ func TestSetPeersSameConfigKeepsSession(t *testing.T) {
 	}
 }
 
+func TestMaxPrefixesClosesSession(t *testing.T) {
+	cfg := testConfig(65000)
+	cfg.MaxPrefixes = 1
+	srv := startTestServer(t, cfg)
+	srv.SetAllowlist([]uint32{65001}, true)
+
+	conn, notifs := testPeer(t, srv.Addr(), 65001, false)
+	if len(notifs) == 1 {
+		t.Fatal("peer was unexpectedly rejected")
+	}
+
+	// Two prefixes exceed MaxPrefixes=1.
+	update := encodeUpdateV4(
+		[][4]byte{{10, 0, 0, 0}, {192, 0, 2, 0}},
+		[]int{8, 24},
+		65001, false, [4]byte{1, 2, 3, 4}, nil, nil, false,
+	)
+	if _, err := conn.Write(update); err != nil {
+		t.Fatalf("send update: %v", err)
+	}
+
+	sawNotification := false
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		_ = conn.SetReadDeadline(deadline)
+		msg, err := readMessage(conn)
+		if err != nil {
+			break
+		}
+		if msg.Type == msgNotification {
+			sawNotification = true
+			break
+		}
+	}
+	if !sawNotification {
+		t.Fatal("expected NOTIFICATION after exceeding max prefixes")
+	}
+}
+
+func TestMaxDynamicSessionsRejectsExtra(t *testing.T) {
+	cfg := testConfig(65000)
+	cfg.MaxDynamicSessions = 1
+	srv := startTestServer(t, cfg)
+	srv.SetAllowlist([]uint32{65001}, true)
+
+	_, notifs := testPeer(t, srv.Addr(), 65001, false)
+	if len(notifs) == 1 {
+		t.Fatal("first peer was unexpectedly rejected")
+	}
+
+	conn2, err := net.DialTimeout("tcp", srv.Addr(), 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial second peer: %v", err)
+	}
+	defer conn2.Close()
+	_ = conn2.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1)
+	if n, err := conn2.Read(buf); err == nil && n > 0 {
+		t.Fatal("expected second dynamic session to be closed")
+	}
+}
+
 // bytesReader adapts a byte slice to io.Reader without importing bytes in the
 // test hot path.
 type byteReader struct {

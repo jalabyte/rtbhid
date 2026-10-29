@@ -73,7 +73,9 @@ func (s *Store) UpdateAgentHeartbeat(id string, status string, prefixCount int, 
 
 func (s *Store) ListAgents() []Agent {
 	rows, err := s.db.Query(`
-		SELECT id, name, hostname, bird_version, listen_addr, status, last_seen, created_at, updated_at
+		SELECT id, COALESCE(name, ''), COALESCE(hostname, ''), COALESCE(bird_version, ''),
+		       COALESCE(listen_addr, ''), COALESCE(status, 'offline'), last_seen,
+		       created_at, updated_at
 		FROM agents ORDER BY name`)
 	if err != nil {
 		return nil
@@ -94,7 +96,9 @@ func (s *Store) ListAgents() []Agent {
 func (s *Store) GetAgent(id string) (Agent, bool) {
 	var a Agent
 	err := s.db.QueryRow(`
-		SELECT id, name, hostname, bird_version, listen_addr, status, last_seen, created_at, updated_at
+		SELECT id, COALESCE(name, ''), COALESCE(hostname, ''), COALESCE(bird_version, ''),
+		       COALESCE(listen_addr, ''), COALESCE(status, 'offline'), last_seen,
+		       created_at, updated_at
 		FROM agents WHERE id = ?`, id).
 		Scan(&a.ID, &a.Name, &a.Hostname, &a.BirdVersion, &a.ListenAddr, &a.Status, &a.LastSeen, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
