@@ -89,6 +89,12 @@ func main() {
 		log.Fatalf("init http server: %v", err)
 	}
 	httpServer.SetMetricsToken(metricsToken)
+	httpServer.SetAgentInstall(httpapi.AgentInstallConfig{
+		PortalURL: getEnv("RTBH_AGENT_PORTAL_URL", ""),
+		PortalTLS: getEnvBool("RTBH_AGENT_PORTAL_TLS", true),
+		BinaryDir: getEnv("RTBH_AGENT_BINARY_DIR", ""),
+		LocalASN:  localASN,
+	})
 	srv := &http.Server{
 		Addr:              listenAddr,
 		Handler:           httpServer.Handler(),

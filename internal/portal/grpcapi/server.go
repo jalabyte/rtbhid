@@ -3,15 +3,22 @@ package grpcapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
+	"strings"
 
 	pb "rtbhid/gen/rtbhid"
 	"rtbhid/internal/portal"
 	"rtbhid/internal/portal/state"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 )
 
 // Server implements the gRPC Portal service.
@@ -55,6 +62,9 @@ func (s *Server) ListenAndServe() error {
 // register the agent and returns a success response with a heartbeat
 // interval of 30 seconds.
 func (s *Server) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
+	if err := s.authorize(ctx, req.GetAgentId()); err != nil {
+		return nil, err
+	}
 	err := s.svc.HandleRegister(
 		req.GetAgentId(),
 		req.GetName(),
@@ -79,18 +89,22 @@ func (s *Server) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.Reg
 
 // Heartbeat handles agent health reports. It always returns success.
 func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
+	if err := s.authorize(ctx, req.GetAgentId()); err != nil {
+		return nil, err
+	}
 	sessions := make([]state.BGPSession, 0, len(req.GetBgpSessions()))
 	for _, sess := range req.GetBgpSessions() {
 		sessions = append(sessions, state.BGPSession{
-			Peer:       sess.GetPeer(),
-			Name:       sess.GetName(),
-			RemoteAS:   sess.GetRemoteAs(),
-			LocalAS:    sess.GetLocalAs(),
-			State:      sess.GetState(),
-			Passive:    sess.GetPassive(),
-			UptimeSec:  sess.GetUptimeSec(),
-			PrefixesIn: int(sess.GetPrefixesIn()),
-			LastError:  sess.GetLastError(),
+			Peer:        sess.GetPeer(),
+			Name:        sess.GetName(),
+			RemoteAS:    sess.GetRemoteAs(),
+			LocalAS:     sess.GetLocalAs(),
+			State:       sess.GetState(),
+			Passive:     sess.GetPassive(),
+			UptimeSec:   sess.GetUptimeSec(),
+			PrefixesIn:  int(sess.GetPrefixesIn()),
+			PrefixesOut: int(sess.GetPrefixesOut()),
+			LastError:   sess.GetLastError(),
 		})
 	}
 	s.svc.HandleHeartbeat(
@@ -112,6 +126,9 @@ func (s *Server) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.H
 // from the channel, and unregisters on exit.
 func (s *Server) StreamConfig(req *pb.ConfigRequest, stream pb.Portal_StreamConfigServer) error {
 	agentID := req.GetAgentId()
+	if err := s.authorize(stream.Context(), agentID); err != nil {
+		return err
+	}
 
 	ch := s.svc.RegisterStream(agentID)
 	defer s.svc.UnregisterStream(agentID)
@@ -127,4 +144,38 @@ func (s *Server) StreamConfig(req *pb.ConfigRequest, stream pb.Portal_StreamConf
 
 	log.Printf("agent %s config stream closed", agentID)
 	return nil
+}
+
+// authorize admits an agent by its bearer token. An agent on the portal host
+// itself (loopback peer, not forwarded by a proxy) may connect without one,
+// which keeps single-box installs working. Caddy always adds
+// X-Forwarded-For, so proxied remote agents never match that exemption.
+func (s *Server) authorize(ctx context.Context, agentID string) error {
+	if agentID == "" {
+		return status.Error(codes.InvalidArgument, "agent_id is required")
+	}
+	md, _ := metadata.FromIncomingContext(ctx)
+	token := ""
+	if v := md.Get("authorization"); len(v) > 0 {
+		token = strings.TrimSpace(strings.TrimPrefix(v[0], "Bearer "))
+	}
+	if token == "" && len(md.Get("x-forwarded-for")) == 0 && isLoopbackPeer(ctx) {
+		return nil
+	}
+	if err := s.svc.AuthorizeAgent(token, agentID); err != nil {
+		if errors.Is(err, portal.ErrAgentUnauthorized) {
+			return status.Error(codes.Unauthenticated, err.Error())
+		}
+		return status.Error(codes.Internal, err.Error())
+	}
+	return nil
+}
+
+func isLoopbackPeer(ctx context.Context) bool {
+	p, ok := peer.FromContext(ctx)
+	if !ok || p.Addr == nil {
+		return false
+	}
+	ap, err := netip.ParseAddrPort(p.Addr.String())
+	return err == nil && ap.Addr().Unmap().IsLoopback()
 }

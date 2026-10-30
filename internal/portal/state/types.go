@@ -14,6 +14,15 @@ type Agent struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
+// AgentToken lets one remote agent enroll and connect to the portal.
+type AgentToken struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	AgentID    string     `json:"agent_id"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+}
+
 type Prefix struct {
 	ID        int64     `json:"id"`
 	CIDR      string    `json:"cidr"`
@@ -31,6 +40,7 @@ type Source struct {
 	LastSync  *time.Time `json:"last_sync"`
 	LastCount int        `json:"last_count"`
 	CreatedAt time.Time  `json:"created_at"`
+	LastError string     `json:"last_error"` // empty after a successful sync
 }
 
 type Exclude struct {
@@ -74,18 +84,19 @@ type WhitelistASN struct {
 
 // BGPSession is a live BGP session reported by an agent.
 type BGPSession struct {
-	AgentID    string    `json:"agent_id"`
-	AgentName  string    `json:"agent_name,omitempty"`
-	Peer       string    `json:"peer"`
-	Name       string    `json:"name"`
-	RemoteAS   uint32    `json:"remote_as"`
-	LocalAS    uint32    `json:"local_as"`
-	State      string    `json:"state"`
-	Passive    bool      `json:"passive"`
-	UptimeSec  int64     `json:"uptime_sec"`
-	PrefixesIn int       `json:"prefixes_in"`
-	LastError  string    `json:"last_error"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	AgentID     string    `json:"agent_id"`
+	AgentName   string    `json:"agent_name,omitempty"`
+	Peer        string    `json:"peer"`
+	Name        string    `json:"name"`
+	RemoteAS    uint32    `json:"remote_as"`
+	LocalAS     uint32    `json:"local_as"`
+	State       string    `json:"state"`
+	Passive     bool      `json:"passive"`
+	UptimeSec   int64     `json:"uptime_sec"`
+	PrefixesIn  int       `json:"prefixes_in"`
+	PrefixesOut int       `json:"prefixes_out"`
+	LastError   string    `json:"last_error"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // LookupMatch represents a single lookup hit.

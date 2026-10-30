@@ -391,6 +391,45 @@ func TestLookupIP_ExcludeListPreventsMatch(t *testing.T) {
 	}
 }
 
+// Excludes do not apply to manual prefixes, so a manual prefix inside an
+// exclude is still blackholed and must still be reported.
+func TestLookupIP_ManualPrefixIgnoresExclude(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	createTestPrefix(t, store, "192.168.1.10/32", true)
+	if _, err := store.CreateExclude(Exclude{CIDR: "192.168.1.0/24", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create exclude: %v", err)
+	}
+
+	results, err := store.LookupIP([]string{"192.168.1.10"})
+	if err != nil {
+		t.Fatalf("LookupIP failed: %v", err)
+	}
+	var manual, exclude bool
+	for _, m := range results[0].Matches {
+		manual = manual || m.Type == "manual"
+		exclude = exclude || m.Type == "exclude"
+	}
+	if !manual || !exclude {
+		t.Fatalf("want manual and exclude matches, got %+v", results[0].Matches)
+	}
+}
+
+func TestLookupIP_CIDRInsideCoveringPrefix(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	createTestSource(t, store, "covering", []string{"10.0.0.0/8"})
+	results, err := store.LookupIP([]string{"10.1.2.0/24"})
+	if err != nil {
+		t.Fatalf("LookupIP failed: %v", err)
+	}
+	if len(results[0].Matches) != 1 || results[0].Matches[0].CIDR != "10.0.0.0/8" {
+		t.Fatalf("want the covering 10.0.0.0/8, got %+v", results[0].Matches)
+	}
+}
+
 func TestLookupIP_SubPrefixLookup(t *testing.T) {
 	store := setupTestStore(t)
 	defer store.Close()

@@ -33,6 +33,8 @@ func main() {
 
 func runAgent() {
 	portalURL := getEnv("RTBH_PORTAL_URL", "localhost:50051")
+	portalTLS := getEnvBool("RTBH_PORTAL_TLS", false)
+	agentToken := getEnv("RTBH_AGENT_TOKEN", "")
 	agentName := getEnv("RTBH_AGENT_NAME", hostname())
 	hostName := hostname()
 	birdCommand := getEnv("RTBH_BIRD_COMMAND", "birdc configure")
@@ -59,6 +61,8 @@ func runAgent() {
 
 	client, err := grpcclient.New(grpcclient.Config{
 		PortalURL:          portalURL,
+		PortalTLS:          portalTLS,
+		Token:              agentToken,
 		AgentName:          agentName,
 		Hostname:           hostName,
 		BirdVersion:        birdVersion,
@@ -87,7 +91,7 @@ func runAgent() {
 	defer cancel()
 
 	fmt.Printf("rtbhd agent mode\n")
-	fmt.Printf("portal: %s\n", portalURL)
+	fmt.Printf("portal: %s (tls=%v, token=%v)\n", portalURL, portalTLS, agentToken != "")
 	fmt.Printf("agent name: %s\n", agentName)
 	fmt.Printf("bgp engine: %s\n", bgpEngine)
 	if !strings.EqualFold(bgpEngine, "custom") && !strings.EqualFold(bgpEngine, "embedded") {

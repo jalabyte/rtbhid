@@ -107,5 +107,19 @@ var migrations = []string{
 		updated_at  DATETIME,
 		PRIMARY KEY (agent_id, peer)
 	)`,
+	// Enrollment tokens for remote agents. Only the SHA-256 is stored; agent_id
+	// binds a token to the first agent that registers with it.
+	`CREATE TABLE IF NOT EXISTS agent_tokens (
+		id           TEXT PRIMARY KEY,
+		name         TEXT NOT NULL,
+		token_hash   TEXT NOT NULL UNIQUE,
+		agent_id     TEXT DEFAULT '',
+		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_used_at DATETIME
+	)`,
+	// Re-run on every start; migrate() ignores the duplicate-column error.
+	`ALTER TABLE agent_bgp_sessions ADD COLUMN prefixes_out INTEGER DEFAULT 0`,
+	`ALTER TABLE sources ADD COLUMN last_error TEXT DEFAULT ''`,
+	`ALTER TABLE exclude_sources ADD COLUMN last_error TEXT DEFAULT ''`,
 	`UPDATE peers SET id = 'peer_' || lower(hex(randomblob(4))) || lower(hex(randomblob(2))) || lower(hex(randomblob(2))) || lower(hex(randomblob(2))) || lower(hex(randomblob(6))) WHERE id IS NULL OR id = ''`,
 }

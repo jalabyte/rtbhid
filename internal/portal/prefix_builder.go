@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -17,7 +18,8 @@ var (
 	ErrInvalidASN      = errors.New("invalid asn")
 	ErrNoAddressFamily = errors.New("at least one of ipv4/ipv6 must be true")
 	ErrInvalidSource   = errors.New("invalid irr source")
-	defaultBGPQTimeout = 30 * time.Second
+	// A single bgpq4 run takes 4-10s against public IRR servers; spikes are common.
+	defaultBGPQTimeout = 60 * time.Second
 )
 
 type bgpqPrefix struct {
@@ -46,22 +48,32 @@ func (s *Service) BuildPrefixesFromASNWithSources(ctx context.Context, asn strin
 	ctx, cancel := ensureTimeout(ctx, defaultBGPQTimeout)
 	defer cancel()
 
-	all := make([]string, 0)
-
+	// IPv4 and IPv6 run in parallel so a slow IRR reply only costs one wait.
+	families := []string{}
 	if ipv4 {
-		v4, err := runBGPQWithSources(ctx, normalized, "-4", sourceArg)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, v4...)
+		families = append(families, "-4")
 	}
-
 	if ipv6 {
-		v6, err := runBGPQWithSources(ctx, normalized, "-6", sourceArg)
-		if err != nil {
-			return nil, err
+		families = append(families, "-6")
+	}
+	results := make([][]string, len(families))
+	errs := make([]error, len(families))
+	var wg sync.WaitGroup
+	for i, fam := range families {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = runBGPQWithSources(ctx, normalized, fam, sourceArg)
+		}()
+	}
+	wg.Wait()
+
+	all := make([]string, 0)
+	for i := range families {
+		if errs[i] != nil {
+			return nil, errs[i]
 		}
-		all = append(all, v6...)
+		all = append(all, results[i]...)
 	}
 
 	set := map[string]struct{}{}
@@ -97,6 +109,12 @@ func runBGPQWithSources(ctx context.Context, asn string, familyFlag string, sour
 
 	cmd := exec.CommandContext(ctx, "bgpq4", args...)
 	output, err := cmd.CombinedOutput()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil, fmt.Errorf("IRR query timed out; the IRR server is slow, try again or select fewer sources")
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("bgpq4 failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}

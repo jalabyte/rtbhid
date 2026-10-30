@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# RTBH agent installer, served by the portal. Installs rtbhd with the built-in
+# BGP speaker as a systemd service and enrolls it with the portal.
+#
+#   curl -fsSL {{.BaseURL}}/install-agent.sh | sudo bash -s -- --token TOKEN
+#
+# Re-running it upgrades the binary and rewrites the config (old one kept as .bak).
+set -euo pipefail
+
+BASE_URL={{sh .BaseURL}}
+PORTAL_URL={{sh .PortalURL}}
+PORTAL_TLS={{.PortalTLS}}
+TOKEN=""
+ASN={{.LocalASN}}
+NAME="$(hostname -s 2>/dev/null || hostname)"
+ROUTER_ID=""
+NEXTHOP_V4=""
+NEXTHOP_V6=""
+
+usage() {
+  cat <<EOF
+Options:
+  --token TOKEN     enrollment token from the portal's Agents page (required)
+  --asn N           local ASN used in BGP sessions (default: $ASN)
+  --name NAME       name shown in the portal (default: $NAME)
+  --router-id IP    BGP router ID (default: derived from host addresses)
+  --nexthop-v4 IP   next hop for IPv4 announcements (default: session address)
+  --nexthop-v6 IP   next hop for IPv6 announcements (default: session address)
+EOF
+}
+
+die() { echo "error: $*" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --token) TOKEN="${2:?missing value for --token}"; shift 2 ;;
+    --asn) ASN="${2:?missing value for --asn}"; shift 2 ;;
+    --name) NAME="${2:?missing value for --name}"; shift 2 ;;
+    --router-id) ROUTER_ID="${2:?missing value for --router-id}"; shift 2 ;;
+    --nexthop-v4) NEXTHOP_V4="${2:?missing value for --nexthop-v4}"; shift 2 ;;
+    --nexthop-v6) NEXTHOP_V6="${2:?missing value for --nexthop-v6}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "unknown option: $1" ;;
+  esac
+done
+
+[ "$(id -u)" -eq 0 ] || die "run as root (pipe into: sudo bash -s -- ...)"
+command -v systemctl >/dev/null || die "systemd is required"
+[ -n "$TOKEN" ] || { usage >&2; die "--token is required"; }
+[ -n "$PORTAL_URL" ] || die "the portal has no agent address configured (RTBH_AGENT_PORTAL_URL)"
+[[ "$ASN" =~ ^[0-9]+$ ]] || die "--asn must be a number"
+[[ "$NAME" =~ ^[A-Za-z0-9._-]+$ ]] || die "--name may only contain letters, digits, '.', '_' and '-'"
+for ip in "$ROUTER_ID" "$NEXTHOP_V4" "$NEXTHOP_V6"; do
+  [[ "$ip" =~ ^[0-9A-Fa-f.:]*$ ]] || die "invalid address: $ip"
+done
+
+case "$(uname -m)" in
+  x86_64|amd64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) die "unsupported CPU architecture: $(uname -m)" ;;
+esac
+
+echo "==> Downloading rtbhd (linux/$ARCH)"
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+curl -fsSL -H "Authorization: Bearer $TOKEN" "$BASE_URL/download/rtbhd-linux-$ARCH" -o "$TMP" \
+  || die "download failed; check the token, or ask the portal admin to publish the agent binary"
+install -m 0755 "$TMP" /usr/local/bin/rtbhd
+
+echo "==> Creating user and directories"
+if ! id -u rtbhd >/dev/null 2>&1; then
+  useradd --system --home-dir /var/lib/rtbhd --shell "$(command -v nologin || echo /bin/false)" rtbhd
+fi
+install -d -m 0750 -o rtbhd -g rtbhd /var/lib/rtbhd
+
+echo "==> Writing /etc/default/rtbhd"
+[ -f /etc/default/rtbhd ] && cp -p /etc/default/rtbhd "/etc/default/rtbhd.bak.$(date +%Y%m%d%H%M%S)"
+umask 077
+cat > /etc/default/rtbhd <<EOF
+RTBH_MODE=agent
+RTBH_PORTAL_URL=$PORTAL_URL
+RTBH_PORTAL_TLS=$PORTAL_TLS
+RTBH_AGENT_TOKEN=$TOKEN
+RTBH_AGENT_NAME=$NAME
+RTBH_LOCAL_ASN=$ASN
+RTBH_BGP_ENGINE=custom
+RTBH_BGP_LISTEN_ADDR=:179
+RTBH_BGP_ROUTER_ID=$ROUTER_ID
+RTBH_BGP_NEXTHOP_V4=$NEXTHOP_V4
+RTBH_BGP_NEXTHOP_V6=$NEXTHOP_V6
+RTBH_GRPC_MAX_MSG_SIZE=67108864
+EOF
+umask 022
+
+cat > /etc/systemd/system/rtbhd.service <<'EOF'
+[Unit]
+Description=RTBH Agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=rtbhd
+Group=rtbhd
+EnvironmentFile=/etc/default/rtbhd
+# The built-in BGP speaker binds TCP port 179.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+ExecStart=/usr/local/bin/rtbhd
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=/var/lib/rtbhd
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+if command -v ss >/dev/null && ss -lntp 2>/dev/null | grep -E ':179\b' | grep -vq rtbhd; then
+  echo "warning: another process listens on TCP 179 (BIRD?); rtbhd cannot bind until it stops" >&2
+fi
+
+echo "==> Starting rtbhd"
+systemctl daemon-reload
+systemctl enable rtbhd >/dev/null 2>&1
+systemctl restart rtbhd
+
+for _ in $(seq 1 30); do
+  if journalctl -u rtbhd --since "-60s" --no-pager 2>/dev/null | grep -q "registered with portal"; then
+    echo
+    echo "rtbhd is running and enrolled as '$NAME'. It now appears on the portal's Agents page."
+    echo "Logs: journalctl -u rtbhd -f"
+    exit 0
+  fi
+  sleep 1
+done
+echo >&2
+echo "rtbhd started but has not registered with the portal yet. Recent logs:" >&2
+journalctl -u rtbhd -n 15 --no-pager >&2 || true
+exit 1

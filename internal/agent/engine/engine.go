@@ -21,15 +21,16 @@ type Engine interface {
 
 // SessionStatus is a single BGP session as reported to the portal.
 type SessionStatus struct {
-	Peer       string
-	Name       string
-	RemoteAS   uint32
-	LocalAS    uint32
-	State      string
-	Passive    bool
-	UptimeSec  int64
-	PrefixesIn int
-	LastError  string
+	Peer        string
+	Name        string
+	RemoteAS    uint32
+	LocalAS     uint32
+	State       string
+	Passive     bool
+	UptimeSec   int64
+	PrefixesIn  int
+	PrefixesOut int
+	LastError   string
 }
 
 // Reporter is implemented by engines that can report live BGP sessions.
@@ -168,15 +169,16 @@ func (c *Custom) BGPStatus() (string, []SessionStatus) {
 	out := make([]SessionStatus, 0, len(stats))
 	for _, s := range stats {
 		out = append(out, SessionStatus{
-			Peer:       s.Peer,
-			Name:       s.Name,
-			RemoteAS:   s.RemoteAS,
-			LocalAS:    s.LocalAS,
-			State:      s.State,
-			Passive:    s.Passive,
-			UptimeSec:  s.UptimeSec,
-			PrefixesIn: s.PrefixesIn,
-			LastError:  s.LastError,
+			Peer:        s.Peer,
+			Name:        s.Name,
+			RemoteAS:    s.RemoteAS,
+			LocalAS:     s.LocalAS,
+			State:       s.State,
+			Passive:     s.Passive,
+			UptimeSec:   s.UptimeSec,
+			PrefixesIn:  s.PrefixesIn,
+			PrefixesOut: s.PrefixesOut,
+			LastError:   s.LastError,
 		})
 	}
 	return "custom", out

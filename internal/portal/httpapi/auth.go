@@ -173,8 +173,14 @@ func hmacSHA256Hex(secret []byte, payload string) string {
 }
 
 func isPublicPath(path string) bool {
+	// The installer holds no secrets; downloads check the agent token themselves.
+	// /assets/ is the UI bundle (code, fonts), needed to render the public /docs.
+	if strings.HasPrefix(path, "/download/") || strings.HasPrefix(path, "/assets/") {
+		return true
+	}
 	switch path {
-	case "/login", "/docs", "/api/v1/health", "/metrics", "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/me":
+	case "/login", "/docs", "/api/v1/health", "/metrics", "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/me", "/install-agent.sh",
+		"/favicon.ico", "/favicon.svg", "/apple-touch-icon.png", "/site.webmanifest", "/icon-192.png", "/icon-512.png", "/maskable-512.png":
 		return true
 	default:
 		return false

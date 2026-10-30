@@ -34,6 +34,9 @@ func New(dbPath string) (*Store, error) {
 func (s *Store) migrate() error {
 	for _, sql := range migrations {
 		if _, err := s.db.Exec(sql); err != nil {
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
 			return err
 		}
 	}
@@ -247,7 +250,7 @@ func (s *Store) CreateSource(src Source) error {
 }
 
 func (s *Store) ListSources() []Source {
-	rows, err := s.db.Query(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at FROM sources ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at, COALESCE(last_error, '') FROM sources ORDER BY name`)
 	if err != nil {
 		return nil
 	}
@@ -256,7 +259,7 @@ func (s *Store) ListSources() []Source {
 	var out []Source
 	for rows.Next() {
 		var src Source
-		if err := rows.Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt); err != nil {
+		if err := rows.Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt, &src.LastError); err != nil {
 			continue
 		}
 		out = append(out, src)
@@ -266,8 +269,8 @@ func (s *Store) ListSources() []Source {
 
 func (s *Store) GetSource(id string) (Source, bool) {
 	var src Source
-	err := s.db.QueryRow(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at FROM sources WHERE id = ?`, id).
-		Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at, COALESCE(last_error, '') FROM sources WHERE id = ?`, id).
+		Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt, &src.LastError)
 	if err != nil {
 		return Source{}, false
 	}
@@ -320,9 +323,16 @@ func (s *Store) ReplaceSourcePrefixes(sourceID string, cidrs []string) error {
 	return tx.Commit()
 }
 
+// SetSourceSyncError records why the latest sync failed; the previous
+// prefixes and last_sync stay in place.
+func (s *Store) SetSourceSyncError(id, msg string) error {
+	_, err := s.db.Exec(`UPDATE sources SET last_error = ? WHERE id = ?`, msg, id)
+	return err
+}
+
 func (s *Store) SetSourceSyncResult(id string, count int) error {
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE sources SET last_sync = ?, last_count = ? WHERE id = ?`, now, count, id)
+	_, err := s.db.Exec(`UPDATE sources SET last_sync = ?, last_count = ?, last_error = '' WHERE id = ?`, now, count, id)
 	return err
 }
 
@@ -547,7 +557,7 @@ func (s *Store) CreateExcludeSource(src Source) error {
 }
 
 func (s *Store) ListExcludeSources() []Source {
-	rows, err := s.db.Query(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at FROM exclude_sources ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at, COALESCE(last_error, '') FROM exclude_sources ORDER BY name`)
 	if err != nil {
 		return nil
 	}
@@ -556,7 +566,7 @@ func (s *Store) ListExcludeSources() []Source {
 	var out []Source
 	for rows.Next() {
 		var src Source
-		if err := rows.Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt); err != nil {
+		if err := rows.Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt, &src.LastError); err != nil {
 			continue
 		}
 		out = append(out, src)
@@ -566,8 +576,8 @@ func (s *Store) ListExcludeSources() []Source {
 
 func (s *Store) GetExcludeSource(id string) (Source, bool) {
 	var src Source
-	err := s.db.QueryRow(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at FROM exclude_sources WHERE id = ?`, id).
-		Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at, COALESCE(last_error, '') FROM exclude_sources WHERE id = ?`, id).
+		Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt, &src.LastError)
 	if err != nil {
 		return Source{}, false
 	}
@@ -612,9 +622,14 @@ func (s *Store) ReplaceExcludeSourcePrefixes(sourceID string, cidrs []string) er
 	return tx.Commit()
 }
 
+func (s *Store) SetExcludeSourceSyncError(id, msg string) error {
+	_, err := s.db.Exec(`UPDATE exclude_sources SET last_error = ? WHERE id = ?`, msg, id)
+	return err
+}
+
 func (s *Store) SetExcludeSourceSyncResult(id string, count int) error {
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE exclude_sources SET last_sync = ?, last_count = ? WHERE id = ?`, now, count, id)
+	_, err := s.db.Exec(`UPDATE exclude_sources SET last_sync = ?, last_count = ?, last_error = '' WHERE id = ?`, now, count, id)
 	return err
 }
 
@@ -932,10 +947,10 @@ func (s *Store) ReplaceAgentBGPSessions(agentID, engine string, sessions []BGPSe
 			continue
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO agent_bgp_sessions (agent_id, peer, name, remote_as, local_as, state, passive, uptime_sec, prefixes_in, last_error, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			INSERT INTO agent_bgp_sessions (agent_id, peer, name, remote_as, local_as, state, passive, uptime_sec, prefixes_in, prefixes_out, last_error, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			agentID, sess.Peer, sess.Name, sess.RemoteAS, sess.LocalAS, sess.State,
-			sess.Passive, sess.UptimeSec, sess.PrefixesIn, sess.LastError, now); err != nil {
+			sess.Passive, sess.UptimeSec, sess.PrefixesIn, sess.PrefixesOut, sess.LastError, now); err != nil {
 			return err
 		}
 	}
@@ -945,7 +960,7 @@ func (s *Store) ReplaceAgentBGPSessions(agentID, engine string, sessions []BGPSe
 func (s *Store) ListAgentBGPSessions() []BGPSession {
 	rows, err := s.db.Query(`
 		SELECT b.agent_id, COALESCE(a.name, ''), b.peer, COALESCE(b.name, ''), b.remote_as, b.local_as,
-		       COALESCE(b.state, ''), b.passive, b.uptime_sec, b.prefixes_in, COALESCE(b.last_error, ''), b.updated_at
+		       COALESCE(b.state, ''), b.passive, b.uptime_sec, b.prefixes_in, COALESCE(b.prefixes_out, 0), COALESCE(b.last_error, ''), b.updated_at
 		FROM agent_bgp_sessions b
 		LEFT JOIN agents a ON a.id = b.agent_id
 		ORDER BY a.name, b.peer`)
@@ -958,7 +973,7 @@ func (s *Store) ListAgentBGPSessions() []BGPSession {
 	for rows.Next() {
 		var sess BGPSession
 		if err := rows.Scan(&sess.AgentID, &sess.AgentName, &sess.Peer, &sess.Name, &sess.RemoteAS, &sess.LocalAS,
-			&sess.State, &sess.Passive, &sess.UptimeSec, &sess.PrefixesIn, &sess.LastError, &sess.UpdatedAt); err != nil {
+			&sess.State, &sess.Passive, &sess.UptimeSec, &sess.PrefixesIn, &sess.PrefixesOut, &sess.LastError, &sess.UpdatedAt); err != nil {
 			continue
 		}
 		out = append(out, sess)
@@ -1019,6 +1034,22 @@ func (s *Store) ListEvents(limit int) []Event {
 // --------------------------------------------------------------------------
 // EffectivePrefixes - core aggregation logic
 // --------------------------------------------------------------------------
+
+// Shortest prefixes the feed will carry. A default route or a /1 in a remote
+// list (broken or hostile) would otherwise tell every router to blackhole the
+// internet. Receivers should enforce the same floor (see the Docs page).
+const (
+	MinFeedBitsV4 = 8
+	MinFeedBitsV6 = 16
+)
+
+// FeedSafe reports whether p is narrow enough to announce as a blackhole.
+func FeedSafe(p netip.Prefix) bool {
+	if p.Addr().Is4() {
+		return p.Bits() >= MinFeedBitsV4
+	}
+	return p.Bits() >= MinFeedBitsV6
+}
 
 func (s *Store) EffectivePrefixes() []string {
 	// 1. Collect enabled manual prefixes
@@ -1092,9 +1123,12 @@ func (s *Store) EffectivePrefixes() []string {
 		result[cidr] = true
 	}
 
-	// 5. Sort and return
+	// 5. Sort and return, dropping anything too wide to be a blackhole target
 	out := make([]string, 0, len(result))
 	for cidr := range result {
+		if pref, err := netip.ParsePrefix(cidr); err == nil && !FeedSafe(pref) {
+			continue
+		}
 		out = append(out, cidr)
 	}
 	sort.Strings(out)
@@ -1157,10 +1191,8 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 			if storedPrefix, err := netip.ParsePrefix(cidr); err == nil {
 				var matched bool
 				if isQueryCIDR {
-					// Query is CIDR: check if stored prefix is a sub-prefix of query prefix
-					// i.e., query prefix contains stored prefix's network
-					matched = queryPrefix.Bits() <= storedPrefix.Bits() &&
-						queryPrefix.Contains(storedPrefix.Addr())
+					// Query is CIDR: match prefixes inside it and prefixes covering it
+					matched = queryPrefix.Overlaps(storedPrefix)
 				} else {
 					// Query is bare IP: check if stored prefix contains the IP
 					matched = storedPrefix.Contains(queryAddr)
@@ -1194,9 +1226,8 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 			if storedPrefix, err := netip.ParsePrefix(cidr); err == nil {
 				var matched bool
 				if isQueryCIDR {
-					// Query is CIDR: check if stored prefix is a sub-prefix of query prefix
-					matched = queryPrefix.Bits() <= storedPrefix.Bits() &&
-						queryPrefix.Contains(storedPrefix.Addr())
+					// Query is CIDR: match prefixes inside it and prefixes covering it
+					matched = queryPrefix.Overlaps(storedPrefix)
 				} else {
 					// Query is bare IP: check if stored prefix contains the IP
 					matched = storedPrefix.Contains(queryAddr)
@@ -1228,8 +1259,7 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 
 						var matched bool
 						if isQueryCIDR {
-							matched = queryPrefix.Bits() <= pref.Bits() &&
-								queryPrefix.Contains(pref.Addr())
+							matched = queryPrefix.Overlaps(pref)
 						} else {
 							matched = pref.Contains(queryAddr)
 						}
@@ -1263,8 +1293,7 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 
 						var matched bool
 						if isQueryCIDR {
-							matched = queryPrefix.Bits() <= pref.Bits() &&
-								queryPrefix.Contains(pref.Addr())
+							matched = queryPrefix.Overlaps(pref)
 						} else {
 							matched = pref.Contains(queryAddr)
 						}
@@ -1285,7 +1314,9 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 
 		filteredMatches := make([]LookupMatch, 0, len(matches))
 		for _, match := range matches {
-			if match.Type == "exclude" {
+			// Excludes only override source prefixes; manual prefixes are
+			// always in the feed (see EffectivePrefixes).
+			if match.Type == "exclude" || match.Type == "manual" {
 				filteredMatches = append(filteredMatches, match)
 				continue
 			}

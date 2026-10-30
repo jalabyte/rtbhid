@@ -45,6 +45,8 @@ message BgpSession {
     int64 uptime_sec = 7;
     int32 prefixes_in = 8;
     string last_error = 9;
+    // Prefixes currently announced to this peer.
+    int32 prefixes_out = 10;
 }
 
 message HeartbeatResponse {

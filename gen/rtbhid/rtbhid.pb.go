@@ -253,16 +253,18 @@ func (x *HeartbeatRequest) GetBgpEngine() string {
 }
 
 type BgpSession struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Peer          string                 `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	RemoteAs      uint32                 `protobuf:"varint,3,opt,name=remote_as,json=remoteAs,proto3" json:"remote_as,omitempty"`
-	LocalAs       uint32                 `protobuf:"varint,4,opt,name=local_as,json=localAs,proto3" json:"local_as,omitempty"`
-	State         string                 `protobuf:"bytes,5,opt,name=state,proto3" json:"state,omitempty"`
-	Passive       bool                   `protobuf:"varint,6,opt,name=passive,proto3" json:"passive,omitempty"`
-	UptimeSec     int64                  `protobuf:"varint,7,opt,name=uptime_sec,json=uptimeSec,proto3" json:"uptime_sec,omitempty"`
-	PrefixesIn    int32                  `protobuf:"varint,8,opt,name=prefixes_in,json=prefixesIn,proto3" json:"prefixes_in,omitempty"`
-	LastError     string                 `protobuf:"bytes,9,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Peer       string                 `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`
+	Name       string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	RemoteAs   uint32                 `protobuf:"varint,3,opt,name=remote_as,json=remoteAs,proto3" json:"remote_as,omitempty"`
+	LocalAs    uint32                 `protobuf:"varint,4,opt,name=local_as,json=localAs,proto3" json:"local_as,omitempty"`
+	State      string                 `protobuf:"bytes,5,opt,name=state,proto3" json:"state,omitempty"`
+	Passive    bool                   `protobuf:"varint,6,opt,name=passive,proto3" json:"passive,omitempty"`
+	UptimeSec  int64                  `protobuf:"varint,7,opt,name=uptime_sec,json=uptimeSec,proto3" json:"uptime_sec,omitempty"`
+	PrefixesIn int32                  `protobuf:"varint,8,opt,name=prefixes_in,json=prefixesIn,proto3" json:"prefixes_in,omitempty"`
+	LastError  string                 `protobuf:"bytes,9,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	// Prefixes currently announced to this peer.
+	PrefixesOut   int32 `protobuf:"varint,10,opt,name=prefixes_out,json=prefixesOut,proto3" json:"prefixes_out,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -358,6 +360,13 @@ func (x *BgpSession) GetLastError() string {
 		return x.LastError
 	}
 	return ""
+}
+
+func (x *BgpSession) GetPrefixesOut() int32 {
+	if x != nil {
+		return x.PrefixesOut
+	}
+	return 0
 }
 
 type HeartbeatResponse struct {
@@ -795,7 +804,7 @@ const file_rtbhid_proto_rawDesc = "" +
 	"birdStatus\x125\n" +
 	"\fbgp_sessions\x18\x06 \x03(\v2\x12.rtbhid.BgpSessionR\vbgpSessions\x12\x1d\n" +
 	"\n" +
-	"bgp_engine\x18\a \x01(\tR\tbgpEngine\"\xfb\x01\n" +
+	"bgp_engine\x18\a \x01(\tR\tbgpEngine\"\x9e\x02\n" +
 	"\n" +
 	"BgpSession\x12\x12\n" +
 	"\x04peer\x18\x01 \x01(\tR\x04peer\x12\x12\n" +
@@ -809,7 +818,9 @@ const file_rtbhid_proto_rawDesc = "" +
 	"\vprefixes_in\x18\b \x01(\x05R\n" +
 	"prefixesIn\x12\x1d\n" +
 	"\n" +
-	"last_error\x18\t \x01(\tR\tlastError\"-\n" +
+	"last_error\x18\t \x01(\tR\tlastError\x12!\n" +
+	"\fprefixes_out\x18\n" +
+	" \x01(\x05R\vprefixesOut\"-\n" +
 	"\x11HeartbeatResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x94\x01\n" +
 	"\vAgentStatus\x12\x16\n" +

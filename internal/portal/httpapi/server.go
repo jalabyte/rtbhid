@@ -2,7 +2,6 @@
 package httpapi
 
 import (
-	"context"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
@@ -29,6 +28,7 @@ type Server struct {
 	auth         *authManager
 	webAssets    fs.FS
 	metricsToken string
+	agentInstall AgentInstallConfig
 }
 
 // SetMetricsToken requires a bearer token (or ?token=) on GET /metrics. An empty
@@ -64,6 +64,10 @@ func (s *Server) Handler() http.Handler {
 	// Agents
 	mux.HandleFunc("/api/v1/agents", s.handleAgents)
 	mux.HandleFunc("/api/v1/agents/", s.handleAgentByID)
+	mux.HandleFunc("/api/v1/agent-tokens", s.handleAgentTokens)
+	mux.HandleFunc("/api/v1/agent-tokens/", s.handleAgentTokenByID)
+	mux.HandleFunc("/install-agent.sh", s.handleInstallScript)
+	mux.HandleFunc("/download/", s.handleAgentDownload)
 
 	// Prefixes
 	mux.HandleFunc("/api/v1/prefixes", s.handlePrefixes)
@@ -962,6 +966,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		sessions    int
 		established int
 		prefixesIn  int
+		prefixesOut int
 	}
 	agents := make(map[string]*agentAgg)
 	for _, sess := range overview.Items {
@@ -974,6 +979,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		if strings.EqualFold(sess.State, "established") {
 			agg.established++
 			agg.prefixesIn += sess.PrefixesIn
+			agg.prefixesOut += sess.PrefixesOut
 		}
 	}
 	names := make([]string, 0, len(agents))
@@ -996,6 +1002,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("# HELP rtbhid_bgp_prefixes_received Number of prefixes received from established peers.\n")
 	b.WriteString("# TYPE rtbhid_bgp_prefixes_received gauge\n")
 	fmt.Fprintf(&b, "rtbhid_bgp_prefixes_received %d\n", overview.PrefixesIn)
+	b.WriteString("# HELP rtbhid_bgp_prefixes_announced Prefixes announced, summed over established sessions.\n")
+	b.WriteString("# TYPE rtbhid_bgp_prefixes_announced gauge\n")
+	fmt.Fprintf(&b, "rtbhid_bgp_prefixes_announced %d\n", overview.PrefixesOut)
 	b.WriteString("# HELP rtbhid_bgp_sessions_stale Number of sessions whose agent report is older than 60s.\n")
 	b.WriteString("# TYPE rtbhid_bgp_sessions_stale gauge\n")
 	fmt.Fprintf(&b, "rtbhid_bgp_sessions_stale %d\n", staleSessions)
@@ -1006,6 +1015,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(&b, "rtbhid_agent_bgp_sessions{agent=\"%s\",engine=\"%s\"} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.sessions)
 		fmt.Fprintf(&b, "rtbhid_agent_bgp_sessions_established{agent=\"%s\",engine=\"%s\"} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.established)
 		fmt.Fprintf(&b, "rtbhid_agent_bgp_prefixes_received{agent=\"%s\",engine=\"%s\"} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.prefixesIn)
+		fmt.Fprintf(&b, "rtbhid_agent_bgp_prefixes_announced{agent=\"%s\",engine=\"%s\"} %d\n", escapeLabel(id), escapeLabel(agg.engine), agg.prefixesOut)
 	}
 	b.WriteString("# HELP rtbhid_bgp_session_up Whether a BGP session is established (1) or not (0).\n")
 	b.WriteString("# TYPE rtbhid_bgp_session_up gauge\n")
@@ -1295,10 +1305,7 @@ func (s *Server) handlePrefixBuilder(w http.ResponseWriter, r *http.Request) {
 		ipv6 = *req.IPv6
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-
-	prefixes, err := s.svc.BuildPrefixesFromASNWithSources(ctx, req.ASN, ipv4, ipv6, req.Sources)
+	prefixes, err := s.svc.BuildPrefixesFromASNWithSources(r.Context(), req.ASN, ipv4, ipv6, req.Sources)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, portal.ErrInvalidASN) || errors.Is(err, portal.ErrNoAddressFamily) || errors.Is(err, portal.ErrInvalidSource) {

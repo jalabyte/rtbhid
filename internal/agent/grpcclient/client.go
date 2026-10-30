@@ -4,6 +4,7 @@ package grpcclient
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "rtbhid/gen/rtbhid"
@@ -22,7 +24,12 @@ import (
 
 // Config holds the agent gRPC client configuration.
 type Config struct {
-	PortalURL    string
+	PortalURL string
+	// PortalTLS dials the portal over TLS (system roots), e.g. through Caddy.
+	PortalTLS bool
+	// Token is the enrollment token, sent as a bearer token on every call.
+	// Agents on the portal host itself may leave it empty.
+	Token        string
 	AgentID      string
 	AgentName    string
 	Hostname     string
@@ -113,10 +120,18 @@ func (c *Client) Run(ctx context.Context) error {
 	if maxRecvSize <= 0 {
 		maxRecvSize = 4 * 1024 * 1024 // gRPC default
 	}
-	conn, err := grpc.NewClient(c.cfg.PortalURL,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	transport := insecure.NewCredentials()
+	if c.cfg.PortalTLS {
+		transport = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
+	}
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(transport),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxRecvSize)),
-	)
+	}
+	if c.cfg.Token != "" {
+		opts = append(opts, grpc.WithPerRPCCredentials(bearerToken{c.cfg.Token, c.cfg.PortalTLS}))
+	}
+	conn, err := grpc.NewClient(c.cfg.PortalURL, opts...)
 	if err != nil {
 		return fmt.Errorf("connect to portal: %w", err)
 	}
@@ -182,15 +197,16 @@ func (c *Client) sendHeartbeat(ctx context.Context) {
 		sessions = make([]*pb.BgpSession, 0, len(list))
 		for _, s := range list {
 			sessions = append(sessions, &pb.BgpSession{
-				Peer:       s.Peer,
-				Name:       s.Name,
-				RemoteAs:   s.RemoteAS,
-				LocalAs:    s.LocalAS,
-				State:      s.State,
-				Passive:    s.Passive,
-				UptimeSec:  s.UptimeSec,
-				PrefixesIn: int32(s.PrefixesIn),
-				LastError:  s.LastError,
+				Peer:        s.Peer,
+				Name:        s.Name,
+				RemoteAs:    s.RemoteAS,
+				LocalAs:     s.LocalAS,
+				State:       s.State,
+				Passive:     s.Passive,
+				UptimeSec:   s.UptimeSec,
+				PrefixesIn:  int32(s.PrefixesIn),
+				PrefixesOut: int32(s.PrefixesOut),
+				LastError:   s.LastError,
 			})
 		}
 	}
@@ -300,3 +316,16 @@ func (c *Client) loadOrGenerateID() (string, error) {
 	log.Printf("generated new agent ID: %s", id)
 	return id, nil
 }
+
+type bearerToken struct {
+	token  string
+	secure bool
+}
+
+func (b bearerToken) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
+	return map[string]string{"authorization": "Bearer " + b.token}, nil
+}
+
+// RequireTransportSecurity refuses to send the token in clear text unless TLS
+// is off on purpose (a portal reached over a private network).
+func (b bearerToken) RequireTransportSecurity() bool { return b.secure }

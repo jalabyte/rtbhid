@@ -275,6 +275,10 @@ func TestSetRoutesWithdrawsRemovedPrefixes(t *testing.T) {
 	if !sawWithdraw {
 		t.Fatal("expected withdrawal for removed prefix")
 	}
+	waitFor(t, 3*time.Second, func() bool {
+		st := srv.Stats()
+		return len(st) == 1 && st[0].PrefixesOut == 1
+	})
 }
 
 func TestIBGPUpdateOmitsASPathAndSetsLocalPref(t *testing.T) {

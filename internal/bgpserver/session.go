@@ -46,6 +46,7 @@ type session struct {
 	refresh atomic.Bool
 	sentV4  []v4Prefix
 	sentV6  []v6Prefix
+	sent    atomic.Int64 // len(sentV4)+len(sentV6), readable from info()
 
 	warnedUpdate bool // reader goroutine only
 
@@ -110,12 +111,13 @@ func (s *session) setErr(err error) {
 
 func (s *session) info() SessionInfo {
 	info := SessionInfo{
-		Peer:     s.remoteIP(),
-		Name:     s.name(),
-		RemoteAS: s.remoteAS,
-		LocalAS:  s.localAS,
-		State:    s.state.Load().(string),
-		Passive:  s.passive,
+		Peer:        s.remoteIP(),
+		Name:        s.name(),
+		RemoteAS:    s.remoteAS,
+		LocalAS:     s.localAS,
+		State:       s.state.Load().(string),
+		Passive:     s.passive,
+		PrefixesOut: int(s.sent.Load()),
 	}
 	if v, ok := s.lastErr.Load().(string); ok {
 		info.LastError = v
@@ -426,6 +428,7 @@ func (s *session) syncRoutes() error {
 	}
 
 	s.sentV4, s.sentV6 = wantV4, wantV6
+	s.sent.Store(int64(len(wantV4) + len(wantV6)))
 	return nil
 }
 

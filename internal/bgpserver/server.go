@@ -96,6 +96,7 @@ type SessionInfo struct {
 	Passive     bool      `json:"passive"`
 	UptimeSec   int64     `json:"uptime_sec"`
 	PrefixesIn  int       `json:"prefixes_in"` // always 0: announce-only
+	PrefixesOut int       `json:"prefixes_out"`
 	Established time.Time `json:"established,omitempty"`
 	LastError   string    `json:"last_error,omitempty"`
 }
