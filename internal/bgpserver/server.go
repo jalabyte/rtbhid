@@ -201,6 +201,9 @@ func (s *Server) Start(ctx context.Context) error {
 		s.lnNetwork = network
 		return nil
 	}}
+	// Go >= 1.24 listens with MPTCP by default on Linux; MPTCP sockets reject
+	// TCP_MD5SIG (ENOPROTOOPT), and BGP gains nothing from it.
+	lc.SetMultipathTCP(false)
 	ln, err := lc.Listen(ctx, "tcp", s.cfg.ListenAddr)
 	if err != nil {
 		s.mu.Unlock()
