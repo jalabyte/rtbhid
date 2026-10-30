@@ -108,6 +108,12 @@ func runAgent() {
 	fmt.Printf("gRPC max msg size: %d bytes\n", grpcMaxMsgSize)
 
 	if err := client.Run(ctx); err != nil {
+		// SIGTERM/SIGINT surfaces as a (possibly gRPC-wrapped) cancel error;
+		// that is a clean stop, not a failure for systemd.
+		if ctx.Err() != nil {
+			log.Printf("agent stopped: %v", context.Cause(ctx))
+			return
+		}
 		log.Fatalf("agent error: %v", err)
 	}
 }
