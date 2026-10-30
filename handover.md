@@ -166,8 +166,6 @@ npm run dev         # Vite dev server (proxies API to :8088)
 | `RTBH_BGP_NEXTHOP_V6` | local addr | IPv6 announcement next hop |
 | `RTBH_BGP_HOLD_TIME_SEC` | `90` | BGP hold time |
 | `RTBH_BGP_ENABLE_IPV6` | `true` | Advertise IPv6 unicast capability |
-| `RTBH_BGP_MAX_PREFIXES` | `1000` | Max prefixes accepted from a peer |
-| `RTBH_BGP_MAX_DYNAMIC_PEERS` | `256` | Max inbound auto-accepted sessions |
 | `RTBH_STATE_PATH` | `./data/state.json` | JSON state file (standalone) |
 | `RTBH_EXPORT_STD_COMMUNITIES` | | Standard BGP communities for export |
 | `RTBH_EXPORT_LARGE_COMMUNITIES` | | Large BGP communities for export |

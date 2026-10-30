@@ -1,10 +1,13 @@
 package bgpserver
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 )
@@ -14,7 +17,6 @@ func testConfig(asn uint32) Config {
 		LocalASN:       asn,
 		ListenAddr:     "127.0.0.1:0",
 		HoldTime:       3 * time.Second,
-		MaxPrefixes:    1000,
 		DialTimeout:    2 * time.Second,
 		EnableIPv6:     true,
 		NexthopV6:      netip.MustParseAddr("2001:db8::1"),
@@ -414,9 +416,45 @@ func TestInboundRejectedWhenAutoAcceptDisabled(t *testing.T) {
 	srv := startTestServer(t, testConfig(65000))
 	srv.SetAllowlist([]uint32{65001}, false)
 
-	_, notifs := testPeer(t, srv.Addr(), 65001, false)
-	if len(notifs) != 1 || notifs[0].Type != msgNotification {
-		t.Fatal("expected NOTIFICATION when auto-accept is disabled, even for a whitelisted ASN")
+	// Unknown hosts are dropped before the OPEN exchange.
+	conn, err := net.Dial("tcp", srv.Addr())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := readMessage(conn); err == nil {
+		t.Fatal("expected connection to be closed when auto-accept is disabled, even for a whitelisted ASN")
+	}
+}
+
+func TestIBGPUpdateHasEmptyASPath(t *testing.T) {
+	raw := encodeUpdateV4([][4]byte{{10, 0, 0, 0}}, []int{8}, 65000, true, [4]byte{1, 2, 3, 4}, nil, nil, true)
+	// ORIGIN (4 bytes) is first; AS_PATH must follow with zero length.
+	attrs := raw[headerLen+4:]
+	if attrs[4] != 0x40 || attrs[5] != attrASPath || attrs[6] != 0 {
+		t.Fatalf("iBGP UPDATE must carry an empty AS_PATH, got % x", attrs[4:7])
+	}
+}
+
+func TestNegotiateHoldZeroWins(t *testing.T) {
+	if got := negotiateHold(90*time.Second, 0); got != 0 {
+		t.Fatalf("peer hold 0 must negotiate to 0, got %s", got)
+	}
+	if got := negotiateHold(90*time.Second, 30); got != 30*time.Second {
+		t.Fatalf("want 30s, got %s", got)
+	}
+}
+
+func TestDiffSorted(t *testing.T) {
+	a := buildSnapshot([]string{"10.0.0.0/8", "10.0.0.0/16", "192.0.2.1", "192.0.2.1"}).v4
+	b := buildSnapshot([]string{"10.0.0.0/16", "198.51.100.0/24"}).v4
+	if len(a) != 3 {
+		t.Fatalf("dedup failed: %v", a)
+	}
+	del, add := diffSorted(a, b, compareV4)
+	if len(del) != 2 || len(add) != 1 || add[0].addr != [4]byte{198, 51, 100, 0} {
+		t.Fatalf("del=%v add=%v", del, add)
 	}
 }
 
@@ -503,65 +541,63 @@ func TestSetPeersSameConfigKeepsSession(t *testing.T) {
 	}
 }
 
-func TestMaxPrefixesClosesSession(t *testing.T) {
-	cfg := testConfig(65000)
-	cfg.MaxPrefixes = 1
-	srv := startTestServer(t, cfg)
+func TestPeerUpdatesIgnoredSessionStaysUp(t *testing.T) {
+	srv := startTestServer(t, testConfig(65000))
 	srv.SetAllowlist([]uint32{65001}, true)
 
 	conn, notifs := testPeer(t, srv.Addr(), 65001, false)
 	if len(notifs) == 1 {
 		t.Fatal("peer was unexpectedly rejected")
 	}
-
-	// Two prefixes exceed MaxPrefixes=1.
 	update := encodeUpdateV4(
 		[][4]byte{{10, 0, 0, 0}, {192, 0, 2, 0}},
 		[]int{8, 24},
 		65001, false, [4]byte{1, 2, 3, 4}, nil, nil, false,
 	)
-	if _, err := conn.Write(update); err != nil {
-		t.Fatalf("send update: %v", err)
+	for range 3 {
+		if _, err := conn.Write(update); err != nil {
+			t.Fatalf("send update: %v", err)
+		}
 	}
+	waitFor(t, 2*time.Second, func() bool {
+		st := srv.Stats()
+		return len(st) == 1 && st[0].State == stateEstablished &&
+			st[0].PrefixesIn == 0 && strings.Contains(st[0].LastError, "announce-only")
+	})
+}
 
-	sawNotification := false
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		_ = conn.SetReadDeadline(deadline)
-		msg, err := readMessage(conn)
-		if err != nil {
-			break
-		}
-		if msg.Type == msgNotification {
-			sawNotification = true
-			break
-		}
+func TestAS4PathForTwoBytePeer(t *testing.T) {
+	raw := encodeUpdateV4([][4]byte{{10, 0, 0, 0}}, []int{8}, 4200000000, false, [4]byte{1, 2, 3, 4}, nil, nil, false)
+	if !bytes.Contains(raw, []byte{0x40, attrASPath, 4, 2, 1, 0x5b, 0xa0}) {
+		t.Fatal("AS_PATH must carry AS_TRANS for a 2-byte peer")
 	}
-	if !sawNotification {
-		t.Fatal("expected NOTIFICATION after exceeding max prefixes")
+	if !bytes.Contains(raw, []byte{0xc0, attrAS4Path, 6, 2, 1, 0xfa, 0x56, 0xea, 0x00}) {
+		t.Fatal("AS4_PATH must carry the real 4-byte ASN")
+	}
+	if raw := encodeUpdateV4([][4]byte{{10, 0, 0, 0}}, []int{8}, 4200000000, true, [4]byte{1, 2, 3, 4}, nil, nil, false); bytes.Contains(raw, []byte{0xc0, attrAS4Path}) {
+		t.Fatal("AS4_PATH must not be sent to a 4-byte-capable peer")
 	}
 }
 
-func TestMaxDynamicSessionsRejectsExtra(t *testing.T) {
-	cfg := testConfig(65000)
-	cfg.MaxDynamicSessions = 1
-	srv := startTestServer(t, cfg)
-	srv.SetAllowlist([]uint32{65001}, true)
-
-	_, notifs := testPeer(t, srv.Addr(), 65001, false)
-	if len(notifs) == 1 {
-		t.Fatal("first peer was unexpectedly rejected")
+func TestMD5SigLayout(t *testing.T) {
+	b, err := md5SigBytes(false, netip.MustParseAddr("192.0.2.7"), "secret")
+	if err != nil || len(b) != 216 {
+		t.Fatalf("len=%d err=%v", len(b), err)
 	}
-
-	conn2, err := net.DialTimeout("tcp", srv.Addr(), 2*time.Second)
-	if err != nil {
-		t.Fatalf("dial second peer: %v", err)
+	if binary.NativeEndian.Uint16(b[0:2]) != afInet || !bytes.Equal(b[4:8], []byte{192, 0, 2, 7}) ||
+		binary.NativeEndian.Uint16(b[130:132]) != 6 || string(b[136:142]) != "secret" {
+		t.Fatalf("bad IPv4 layout: % x", b[:16])
 	}
-	defer conn2.Close()
-	_ = conn2.SetReadDeadline(time.Now().Add(2 * time.Second))
-	buf := make([]byte, 1)
-	if n, err := conn2.Read(buf); err == nil && n > 0 {
-		t.Fatal("expected second dynamic session to be closed")
+	// IPv4 peer on a dual-stack socket uses the v4-mapped IPv6 address.
+	b, _ = md5SigBytes(true, netip.MustParseAddr("192.0.2.7"), "")
+	if binary.NativeEndian.Uint16(b[0:2]) != afInet6 || !bytes.Equal(b[8:24], []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 0, 2, 7}) {
+		t.Fatalf("bad mapped layout: % x", b[:24])
+	}
+	if _, err := md5SigBytes(false, netip.MustParseAddr("2001:db8::1"), "x"); err == nil {
+		t.Fatal("IPv6 peer on IPv4 socket must fail")
+	}
+	if _, err := md5SigBytes(false, netip.MustParseAddr("192.0.2.7"), strings.Repeat("k", 81)); err == nil {
+		t.Fatal("key > 80 bytes must fail")
 	}
 }
 

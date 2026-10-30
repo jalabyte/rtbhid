@@ -314,9 +314,13 @@ func attrOriginIGP() pathAttr {
 	return pathAttr{Flags: 0x40, Code: attrOrigin, Value: []byte{0}}
 }
 
-func makeASPath(localASN uint32, as4 bool) pathAttr {
+// makeASPath builds AS_PATH. It is mandatory even for iBGP, where it is sent
+// empty (RFC 4271 5.1.2); omitting it makes peers drop the UPDATE.
+func makeASPath(localASN uint32, as4, ibgp bool) pathAttr {
 	var v []byte
-	if as4 {
+	if ibgp {
+		// empty
+	} else if as4 {
 		v = append(v, 2, 1) // AS_SEQUENCE, one AS
 		var b [4]byte
 		binary.BigEndian.PutUint32(b[:], localASN)
@@ -330,6 +334,18 @@ func makeASPath(localASN uint32, as4 bool) pathAttr {
 		v = append(v, byte(asn>>8), byte(asn))
 	}
 	return pathAttr{Flags: 0x40, Code: attrASPath, Value: v}
+}
+
+// needAS4Path: a peer without 4-byte ASN support sees AS_TRANS in AS_PATH, so
+// the real ASN must ride along in AS4_PATH (RFC 6793 4.2.2).
+func needAS4Path(localASN uint32, as4, ibgp bool) bool {
+	return !ibgp && !as4 && localASN > 0xffff
+}
+
+func makeAS4Path(localASN uint32) pathAttr {
+	v := []byte{2, 1, 0, 0, 0, 0} // AS_SEQUENCE, one 4-byte AS
+	binary.BigEndian.PutUint32(v[2:], localASN)
+	return pathAttr{Flags: 0xc0, Code: attrAS4Path, Value: v} // optional transitive
 }
 
 func attrNextHopV4(ip [4]byte) pathAttr {
@@ -393,18 +409,18 @@ func encodeNLRI(prefix []byte, bits int) []byte {
 }
 
 func encodeUpdateV4(prefixes [][4]byte, bits []int, localASN uint32, as4 bool, nextHop [4]byte, comms []uint32, large []LargeCommunity, ibgp bool) []byte {
-	attrs := []pathAttr{attrOriginIGP()}
+	attrs := []pathAttr{attrOriginIGP(), makeASPath(localASN, as4, ibgp), attrNextHopV4(nextHop)}
 	if ibgp {
 		attrs = append(attrs, makeLocalPref(100))
-	} else {
-		attrs = append(attrs, makeASPath(localASN, as4))
 	}
-	attrs = append(attrs, attrNextHopV4(nextHop))
 	if len(comms) > 0 {
 		attrs = append(attrs, makeCommunities(comms))
 	}
 	if len(large) > 0 {
 		attrs = append(attrs, attrLargeCommunities(large))
+	}
+	if needAS4Path(localASN, as4, ibgp) {
+		attrs = append(attrs, makeAS4Path(localASN))
 	}
 	attrBytes := encodePathAttrs(attrs)
 
@@ -422,17 +438,18 @@ func encodeUpdateV4(prefixes [][4]byte, bits []int, localASN uint32, as4 bool, n
 }
 
 func encodeUpdateV6(prefixes [][16]byte, bits []int, localASN uint32, as4 bool, nextHop [16]byte, comms []uint32, large []LargeCommunity, ibgp bool) []byte {
-	attrs := []pathAttr{attrOriginIGP()}
+	attrs := []pathAttr{attrOriginIGP(), makeASPath(localASN, as4, ibgp)}
 	if ibgp {
 		attrs = append(attrs, makeLocalPref(100))
-	} else {
-		attrs = append(attrs, makeASPath(localASN, as4))
 	}
 	if len(comms) > 0 {
 		attrs = append(attrs, makeCommunities(comms))
 	}
 	if len(large) > 0 {
 		attrs = append(attrs, attrLargeCommunities(large))
+	}
+	if needAS4Path(localASN, as4, ibgp) {
+		attrs = append(attrs, makeAS4Path(localASN))
 	}
 	var nlri []byte
 	for i, p := range prefixes {
@@ -573,6 +590,9 @@ func decodeNLRI(data []byte, isV6 bool) ([]netipPrefix, error) {
 	var out []netipPrefix
 	for len(data) > 0 {
 		bits := int(data[0])
+		if bits > 128 || (!isV6 && bits > 32) {
+			return nil, fmt.Errorf("bgp: invalid NLRI prefix length %d", bits)
+		}
 		byteLen := (bits + 7) / 8
 		if len(data) < 1+byteLen {
 			return nil, errors.New("bgp: truncated NLRI")

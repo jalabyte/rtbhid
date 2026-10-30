@@ -34,15 +34,20 @@ type session struct {
 
 	established   atomic.Bool
 	establishedAt atomic.Int64
-	prefixesIn    atomic.Int32
 	state         atomic.Value // string
 	lastErr       atomic.Value // string
 
 	writeMu sync.Mutex
 
-	routeMu     sync.Mutex
-	announcedV4 map[v4Prefix]struct{}
-	announcedV6 map[v6Prefix]struct{}
+	// kick wakes writerLoop to sync routes; refresh forces a full resend
+	// (ROUTE-REFRESH). sentV4/sentV6 alias the shared snapshot last sent and
+	// are only touched by writerLoop.
+	kick    chan struct{}
+	refresh atomic.Bool
+	sentV4  []v4Prefix
+	sentV6  []v6Prefix
+
+	warnedUpdate bool // reader goroutine only
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -50,16 +55,15 @@ type session struct {
 
 func newSession(srv *Server, conn net.Conn, static *PeerConfig, passive bool) *session {
 	sess := &session{
-		srv:         srv,
-		conn:        conn,
-		static:      static,
-		passive:     passive,
-		localAS:     srv.cfg.LocalASN,
-		routerID:    routerIDUint32(srv.routerID()),
-		hold:        srv.cfg.HoldTime,
-		closed:      make(chan struct{}),
-		announcedV4: make(map[v4Prefix]struct{}),
-		announcedV6: make(map[v6Prefix]struct{}),
+		srv:      srv,
+		conn:     conn,
+		static:   static,
+		passive:  passive,
+		localAS:  srv.cfg.LocalASN,
+		routerID: routerIDUint32(srv.routerID()),
+		hold:     srv.cfg.HoldTime,
+		closed:   make(chan struct{}),
+		kick:     make(chan struct{}, 1),
 	}
 	if static != nil {
 		if static.LocalAS != 0 {
@@ -106,13 +110,12 @@ func (s *session) setErr(err error) {
 
 func (s *session) info() SessionInfo {
 	info := SessionInfo{
-		Peer:       s.remoteIP(),
-		Name:       s.name(),
-		RemoteAS:   s.remoteAS,
-		LocalAS:    s.localAS,
-		State:      s.state.Load().(string),
-		Passive:    s.passive,
-		PrefixesIn: int(s.prefixesIn.Load()),
+		Peer:     s.remoteIP(),
+		Name:     s.name(),
+		RemoteAS: s.remoteAS,
+		LocalAS:  s.localAS,
+		State:    s.state.Load().(string),
+		Passive:  s.passive,
 	}
 	if v, ok := s.lastErr.Load().(string); ok {
 		info.LastError = v
@@ -138,7 +141,11 @@ func (s *session) send(b []byte) error {
 func (s *session) close(notify bool) {
 	s.closeOnce.Do(func() {
 		if notify {
-			_ = s.send(encodeNotification(notifCease, 0, nil))
+			// Best effort with a short deadline so a dead peer can't stall close.
+			s.writeMu.Lock()
+			_ = s.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			_, _ = s.conn.Write(encodeNotification(notifCease, 0, nil))
+			s.writeMu.Unlock()
 		}
 		_ = s.conn.Close()
 		s.setState(stateClosed)
@@ -243,8 +250,6 @@ func (s *Server) runSession(sess *session) {
 		case msgNotification:
 			sess.setErr(fmt.Errorf("peer sent NOTIFICATION during open"))
 			return
-		case msgUpdate:
-			sess.observeUpdate(msg.Body)
 		default:
 			_ = sess.send(encodeNotification(notifFSM, 0, nil))
 			sess.setErr(fmt.Errorf("unexpected message type %d before Established", msg.Type))
@@ -258,8 +263,8 @@ established:
 	sess.setState(stateEstablished)
 	s.log.Printf("bgpserver: session established with %s AS%d (%s)", sess.remoteIP(), sess.remoteAS, sess.name())
 
-	go sess.keepaliveLoop()
-	sess.syncRoutes()
+	go sess.writerLoop()
+	sess.requestSync()
 
 	for {
 		readDeadline := time.Time{}
@@ -280,9 +285,10 @@ established:
 		case msgKeepalive:
 			continue
 		case msgUpdate:
-			sess.observeUpdate(msg.Body)
+			sess.ignoreUpdate()
 		case msgRouteRefresh:
-			sess.syncRoutes()
+			sess.refresh.Store(true)
+			sess.requestSync()
 		case msgNotification:
 			if len(msg.Body) >= 2 {
 				sess.setErr(fmt.Errorf("peer notification code=%d subcode=%d", msg.Body[0], msg.Body[1]))
@@ -311,30 +317,27 @@ func (s *Server) initTimeout() time.Duration {
 	return s.cfg.HoldTime
 }
 
+// negotiateHold returns the smaller hold time; zero (no keepalives) wins.
 func negotiateHold(ours time.Duration, peer uint16) time.Duration {
-	peerHold := time.Duration(peer) * time.Second
-	if peerHold == 0 {
-		return ours
-	}
-	if ours == 0 {
-		return peerHold
-	}
-	if peerHold < ours {
-		return peerHold
-	}
-	return ours
+	return min(ours, time.Duration(peer)*time.Second)
 }
 
-func (s *session) keepaliveLoop() {
-	interval := s.hold / 3
-	if interval <= 0 {
-		interval = 30 * time.Second
+func (s *session) requestSync() {
+	select {
+	case s.kick <- struct{}{}:
+	default: // a sync is already pending; it will read the latest RIB
 	}
-	if interval < time.Second {
-		interval = time.Second
+}
+
+// writerLoop owns route announcements and keepalives for an Established
+// session. UPDATEs reset the peer's hold timer too, so a long sync is safe.
+func (s *session) writerLoop() {
+	var tick <-chan time.Time
+	if s.hold > 0 { // hold 0 means no keepalives (RFC 4271 4.4)
+		t := time.NewTicker(max(s.hold/3, time.Second))
+		defer t.Stop()
+		tick = t.C
 	}
-	t := time.NewTicker(interval)
-	defer t.Stop()
 	for {
 		select {
 		case <-s.closed:
@@ -342,7 +345,12 @@ func (s *session) keepaliveLoop() {
 		case <-s.srv.ctx.Done():
 			s.close(true)
 			return
-		case <-t.C:
+		case <-s.kick:
+			if err := s.syncRoutes(); err != nil {
+				s.close(false)
+				return
+			}
+		case <-tick:
 			if err := s.send(encodeKeepalive()); err != nil {
 				s.close(false)
 				return
@@ -351,120 +359,74 @@ func (s *session) keepaliveLoop() {
 	}
 }
 
-func (s *session) observeUpdate(body []byte) {
-	u, err := decodeUpdate(body)
-	if err != nil {
-		s.setErr(err)
+// ignoreUpdate discards routes from the peer: this speaker is announce-only.
+// Downstream routers should export nothing to us; flag it once if they do.
+func (s *session) ignoreUpdate() {
+	if s.warnedUpdate {
 		return
 	}
-	count := int(s.prefixesIn.Load())
-	count += len(u.Announced) + len(u.MPAnnounced)
-	count -= len(u.Withdrawn) + len(u.MPWithdrawn)
-	if count < 0 {
-		count = 0
-	}
-	if max := s.srv.cfg.MaxPrefixes; max > 0 && count > max {
-		s.setErr(fmt.Errorf("max prefixes exceeded (%d > %d)", count, max))
-		s.close(true)
-		return
-	}
-	s.prefixesIn.Store(int32(count))
+	s.warnedUpdate = true
+	s.setErr(fmt.Errorf("peer sends routes; ignored (announce-only), set its export filter to none"))
+	s.srv.log.Printf("bgpserver: %s (%s) is sending routes; ignoring (announce-only)", s.remoteIP(), s.name())
 }
 
 // syncRoutes reconciles the announced route set for this session with the
-// server RIB.
-func (s *session) syncRoutes() {
-	s.routeMu.Lock()
-	defer s.routeMu.Unlock()
-
+// server RIB. Only writerLoop calls it.
+func (s *session) syncRoutes() error {
 	s.srv.mu.Lock()
 	rib := s.srv.rib
 	s.srv.mu.Unlock()
 
-	desiredV4 := make(map[v4Prefix]struct{}, len(rib.v4))
-	for _, p := range rib.v4 {
-		desiredV4[p] = struct{}{}
-	}
-	desiredV6 := make(map[v6Prefix]struct{}, len(rib.v6))
-	if s.ipv6 {
-		for _, p := range rib.v6 {
-			desiredV6[p] = struct{}{}
-		}
-	}
-
-	var delV4 []v4Prefix
-	for p := range s.announcedV4 {
-		if _, ok := desiredV4[p]; !ok {
-			delV4 = append(delV4, p)
-		}
-	}
-	var addV4 []v4Prefix
-	for p := range desiredV4 {
-		if _, ok := s.announcedV4[p]; !ok {
-			addV4 = append(addV4, p)
-		}
-	}
-	var delV6 []v6Prefix
-	for p := range s.announcedV6 {
-		if _, ok := desiredV6[p]; !ok {
-			delV6 = append(delV6, p)
-		}
-	}
-	var addV6 []v6Prefix
-	for p := range desiredV6 {
-		if _, ok := s.announcedV6[p]; !ok {
-			addV6 = append(addV6, p)
-		}
-	}
-
-	if len(delV4) == 0 && len(addV4) == 0 && len(delV6) == 0 && len(addV6) == 0 {
-		return
+	if s.refresh.Swap(false) {
+		s.sentV4, s.sentV6 = nil, nil
 	}
 
 	nextHop4 := s.nexthopV4()
 	nextHop6 := s.nexthopV6()
+	// Skip a family we cannot give a valid next hop (e.g. IPv4 over an IPv6
+	// transport without RTBH_BGP_NEXTHOP_V4); peers reject 0.0.0.0.
+	wantV4 := rib.v4
+	if nextHop4 == ([4]byte{}) {
+		wantV4 = nil
+	}
+	var wantV6 []v6Prefix
+	if s.ipv6 && nextHop6.IsValid() {
+		wantV6 = rib.v6
+	}
+
+	delV4, addV4 := diffSorted(s.sentV4, wantV4, compareV4)
+	delV6, addV6 := diffSorted(s.sentV6, wantV6, compareV6)
+
 	comms := s.srv.stdCommunityWords()
 	large := s.srv.cfg.LargeCommunities
 
 	for i := 0; i < len(delV4); i += updateChunkV4 {
 		end := min(i+updateChunkV4, len(delV4))
 		if err := s.send(encodeWithdrawV4(delV4[i:end])); err != nil {
-			return
+			return err
 		}
 	}
 	for i := 0; i < len(addV4); i += updateChunkV4 {
 		end := min(i+updateChunkV4, len(addV4))
 		if err := s.send(encodeUpdateV4(prefixesToV4(addV4[i:end]), bitsV4(addV4[i:end]), s.localAS, s.as4, nextHop4, comms, large, s.ibgp)); err != nil {
-			return
+			return err
 		}
 	}
-	if nextHop6.IsValid() {
-		for i := 0; i < len(delV6); i += updateChunkV6 {
-			end := min(i+updateChunkV6, len(delV6))
-			if err := s.send(encodeWithdrawV6(delV6[i:end])); err != nil {
-				return
-			}
+	for i := 0; i < len(delV6); i += updateChunkV6 {
+		end := min(i+updateChunkV6, len(delV6))
+		if err := s.send(encodeWithdrawV6(delV6[i:end])); err != nil {
+			return err
 		}
-		for i := 0; i < len(addV6); i += updateChunkV6 {
-			end := min(i+updateChunkV6, len(addV6))
-			if err := s.send(encodeUpdateV6(prefixesToV6(addV6[i:end]), bitsV6(addV6[i:end]), s.localAS, s.as4, nextHop6.As16(), comms, large, s.ibgp)); err != nil {
-				return
-			}
+	}
+	for i := 0; i < len(addV6); i += updateChunkV6 {
+		end := min(i+updateChunkV6, len(addV6))
+		if err := s.send(encodeUpdateV6(prefixesToV6(addV6[i:end]), bitsV6(addV6[i:end]), s.localAS, s.as4, nextHop6.As16(), comms, large, s.ibgp)); err != nil {
+			return err
 		}
 	}
 
-	for _, p := range delV4 {
-		delete(s.announcedV4, p)
-	}
-	for _, p := range addV4 {
-		s.announcedV4[p] = struct{}{}
-	}
-	for _, p := range delV6 {
-		delete(s.announcedV6, p)
-	}
-	for _, p := range addV6 {
-		s.announcedV6[p] = struct{}{}
-	}
+	s.sentV4, s.sentV6 = wantV4, wantV6
+	return nil
 }
 
 const (
@@ -518,7 +480,7 @@ func prefixesToV4(ps []v4Prefix) [][4]byte {
 func bitsV4(ps []v4Prefix) []int {
 	out := make([]int, len(ps))
 	for i, p := range ps {
-		out[i] = p.bits
+		out[i] = int(p.bits)
 	}
 	return out
 }
@@ -534,7 +496,7 @@ func prefixesToV6(ps []v6Prefix) [][16]byte {
 func bitsV6(ps []v6Prefix) []int {
 	out := make([]int, len(ps))
 	for i, p := range ps {
-		out[i] = p.bits
+		out[i] = int(p.bits)
 	}
 	return out
 }
@@ -542,7 +504,7 @@ func bitsV6(ps []v6Prefix) []int {
 func encodeWithdrawV4(ps []v4Prefix) []byte {
 	var w []byte
 	for _, p := range ps {
-		w = append(w, encodeNLRI(p.addr[:], p.bits)...)
+		w = append(w, encodeNLRI(p.addr[:], int(p.bits))...)
 	}
 	body := make([]byte, 0, 4+len(w))
 	body = append(body, byte(len(w)>>8), byte(len(w)))
@@ -554,7 +516,7 @@ func encodeWithdrawV4(ps []v4Prefix) []byte {
 func encodeWithdrawV6(ps []v6Prefix) []byte {
 	var nlri []byte
 	for _, p := range ps {
-		nlri = append(nlri, encodeNLRI(p.addr[:], p.bits)...)
+		nlri = append(nlri, encodeNLRI(p.addr[:], int(p.bits))...)
 	}
 	attrs := encodePathAttrs([]pathAttr{attrMPUnreachV6(nlri)})
 	body := make([]byte, 0, 4+len(attrs))

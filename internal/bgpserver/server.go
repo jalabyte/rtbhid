@@ -1,20 +1,25 @@
-// Package bgpserver implements a small BGP-4 speaker used by RTBHID agents
-// instead of BIRD. It announces blackhole prefixes to configured peers and,
-// optionally, accepts inbound peering sessions from an explicit ASN allowlist
-// (for example, Indonesian network ASNs).
+// Package bgpserver implements a small, announce-only BGP-4 speaker used by
+// RTBHID agents instead of BIRD. It announces blackhole prefixes to configured
+// peers and, optionally, accepts inbound peering sessions from an explicit ASN
+// allowlist (for example, Indonesian network ASNs). Routes sent by peers are
+// discarded without parsing; there is no inbound RIB.
 package bgpserver
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -73,10 +78,6 @@ type Config struct {
 	// StdCommunities and LargeCommunities are attached to every announcement.
 	StdCommunities   []Community
 	LargeCommunities []LargeCommunity
-	// MaxPrefixes limits prefixes accepted from a peer (default 1000).
-	MaxPrefixes int
-	// MaxDynamicSessions limits inbound auto-accepted sessions (default 256).
-	MaxDynamicSessions int
 	// EnableIPv6 advertises the IPv6 unicast capability.
 	EnableIPv6 bool
 	// DialTimeout for outbound connections. Defaults to 15s.
@@ -94,21 +95,24 @@ type SessionInfo struct {
 	State       string    `json:"state"`
 	Passive     bool      `json:"passive"`
 	UptimeSec   int64     `json:"uptime_sec"`
-	PrefixesIn  int       `json:"prefixes_in"`
+	PrefixesIn  int       `json:"prefixes_in"` // always 0: announce-only
 	Established time.Time `json:"established,omitempty"`
 	LastError   string    `json:"last_error,omitempty"`
 }
 
 type v4Prefix struct {
 	addr [4]byte
-	bits int
+	bits uint8
 }
 
 type v6Prefix struct {
 	addr [16]byte
-	bits int
+	bits uint8
 }
 
+// routeSnapshot is immutable once built: sessions keep a reference to the
+// last snapshot they announced instead of copying it, so memory does not
+// grow with sessions x prefixes.
 type routeSnapshot struct {
 	v4 []v4Prefix
 	v6 []v6Prefix
@@ -128,10 +132,11 @@ type Server struct {
 	dynamic   map[string]*session
 	started   bool
 
-	ln     net.Listener
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ln        net.Listener
+	lnNetwork string // "tcp4" or "tcp6", the listening socket family
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 type peerRuntime struct {
@@ -159,12 +164,6 @@ func New(cfg Config) *Server {
 	if cfg.HoldTime <= 0 {
 		cfg.HoldTime = 90 * time.Second
 	}
-	if cfg.MaxPrefixes <= 0 {
-		cfg.MaxPrefixes = 1000
-	}
-	if cfg.MaxDynamicSessions <= 0 {
-		cfg.MaxDynamicSessions = 256
-	}
 	if cfg.DialTimeout <= 0 {
 		cfg.DialTimeout = 15 * time.Second
 	}
@@ -173,6 +172,9 @@ func New(cfg Config) *Server {
 	}
 	if cfg.LocalASN == 0 {
 		cfg.LocalASN = 65500
+	}
+	if !cfg.RouterID.IsValid() {
+		cfg.RouterID = deriveRouterID()
 	}
 	l := cfg.Logger
 	if l == nil {
@@ -195,7 +197,11 @@ func (s *Server) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return errors.New("bgpserver: already started")
 	}
-	ln, err := net.Listen("tcp", s.cfg.ListenAddr)
+	lc := net.ListenConfig{Control: func(network, _ string, _ syscall.RawConn) error {
+		s.lnNetwork = network
+		return nil
+	}}
+	ln, err := lc.Listen(ctx, "tcp", s.cfg.ListenAddr)
 	if err != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("bgpserver: listen %s: %w", s.cfg.ListenAddr, err)
@@ -219,6 +225,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 	for _, p := range peers {
+		s.installMD5(p.cfg)
 		s.startPeer(p)
 	}
 	return nil
@@ -243,28 +250,27 @@ func (s *Server) Stop() {
 		_ = ln.Close()
 	}
 	for _, sess := range sessions {
-		sess.close(true)
+		go sess.close(true) // in parallel: a stuck peer must not stall shutdown
 	}
 	s.wg.Wait()
 }
 
 func (s *Server) acceptLoop(ln net.Listener) {
 	defer s.wg.Done()
+	var backoff time.Duration
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			select {
-			case <-s.ctx.Done():
+			if s.ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				return
-			default:
 			}
-			var ne net.Error
-			if errors.As(err, &ne) && ne.Timeout() {
-				continue
-			}
-			s.log.Printf("bgpserver: accept error: %v", err)
-			return
+			// Transient (e.g. EMFILE): back off and keep listening, like net/http.
+			backoff = min(max(2*backoff, 5*time.Millisecond), time.Second)
+			s.log.Printf("bgpserver: accept error: %v; retrying in %s", err, backoff)
+			time.Sleep(backoff)
+			continue
 		}
+		backoff = 0
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
@@ -275,13 +281,17 @@ func (s *Server) acceptLoop(ln net.Listener) {
 
 func (s *Server) handleInbound(conn net.Conn) {
 	s.mu.Lock()
-	dynCount := len(s.dynamic)
 	staticPeer := s.findStaticPeerLocked(conn.RemoteAddr())
-	maxDyn := s.cfg.MaxDynamicSessions
+	autoOK := s.autoOK
 	s.mu.Unlock()
 
-	if staticPeer == nil && dynCount >= maxDyn {
-		s.log.Printf("bgpserver: rejecting inbound %s: dynamic session limit reached", conn.RemoteAddr())
+	if staticPeer == nil && !autoOK {
+		// Unknown host and no auto-accept: drop before spending an OPEN exchange.
+		_ = conn.Close()
+		return
+	}
+	if staticPeer != nil && s.establishedWith(staticPeer.Neighbor) {
+		// A session with this peer is already up; avoid a duplicate (collision).
 		_ = conn.Close()
 		return
 	}
@@ -322,58 +332,40 @@ func (s *Server) findStaticPeerLocked(addr net.Addr) *PeerConfig {
 
 // SetRoutes replaces the announced prefix set. Accepted values are IPs or
 // CIDRs. Invalid entries are skipped.
+// SetRoutes replaces the announced prefix set. Accepted values are IPs or
+// CIDRs. Invalid entries are skipped. Sessions are updated asynchronously so a
+// slow peer never blocks the caller or other peers.
 func (s *Server) SetRoutes(prefixes []string) {
 	snap := buildSnapshot(prefixes)
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if slices.Equal(s.rib.v4, snap.v4) && slices.Equal(s.rib.v6, snap.v6) {
+		return
+	}
 	s.rib = snap
-	sessions := s.collectSessionsLocked()
-	s.mu.Unlock()
-
-	for _, sess := range sessions {
-		if sess.established.Load() {
-			sess.syncRoutes()
-		}
+	for sess := range s.sessions {
+		sess.requestSync()
 	}
 }
 
 func buildSnapshot(prefixes []string) routeSnapshot {
 	var snap routeSnapshot
-	seen4 := make(map[v4Prefix]struct{})
-	seen6 := make(map[v6Prefix]struct{})
 	for _, raw := range prefixes {
 		p, err := parsePrefix(raw)
 		if err != nil {
 			continue
 		}
 		if p.Addr().Is4() {
-			v := v4Prefix{addr: p.Addr().As4(), bits: p.Bits()}
-			if _, ok := seen4[v]; ok {
-				continue
-			}
-			seen4[v] = struct{}{}
-			snap.v4 = append(snap.v4, v)
-		} else if p.Addr().Is6() {
-			v := v6Prefix{addr: p.Addr().As16(), bits: p.Bits()}
-			if _, ok := seen6[v]; ok {
-				continue
-			}
-			seen6[v] = struct{}{}
-			snap.v6 = append(snap.v6, v)
+			snap.v4 = append(snap.v4, v4Prefix{addr: p.Addr().As4(), bits: uint8(p.Bits())})
+		} else {
+			snap.v6 = append(snap.v6, v6Prefix{addr: p.Addr().As16(), bits: uint8(p.Bits())})
 		}
 	}
-	sort.Slice(snap.v4, func(i, j int) bool {
-		if cmp := compareV4(snap.v4[i], snap.v4[j]); cmp != 0 {
-			return cmp < 0
-		}
-		return snap.v4[i].bits < snap.v4[j].bits
-	})
-	sort.Slice(snap.v6, func(i, j int) bool {
-		if cmp := compareV6(snap.v6[i], snap.v6[j]); cmp != 0 {
-			return cmp < 0
-		}
-		return snap.v6[i].bits < snap.v6[j].bits
-	})
+	slices.SortFunc(snap.v4, compareV4)
+	slices.SortFunc(snap.v6, compareV6)
+	snap.v4 = slices.Clip(slices.Compact(snap.v4))
+	snap.v6 = slices.Clip(slices.Compact(snap.v6))
 	return snap
 }
 
@@ -400,27 +392,37 @@ func parsePrefix(raw string) (netip.Prefix, error) {
 }
 
 func compareV4(a, b v4Prefix) int {
-	for i := 0; i < 4; i++ {
-		if a.addr[i] < b.addr[i] {
-			return -1
-		}
-		if a.addr[i] > b.addr[i] {
-			return 1
-		}
+	if c := bytes.Compare(a.addr[:], b.addr[:]); c != 0 {
+		return c
 	}
-	return 0
+	return cmp.Compare(a.bits, b.bits)
 }
 
 func compareV6(a, b v6Prefix) int {
-	for i := 0; i < 16; i++ {
-		if a.addr[i] < b.addr[i] {
-			return -1
-		}
-		if a.addr[i] > b.addr[i] {
-			return 1
+	if c := bytes.Compare(a.addr[:], b.addr[:]); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.bits, b.bits)
+}
+
+// diffSorted walks two slices sorted by cmp and returns the entries only in
+// old (to withdraw) and only in new (to announce).
+func diffSorted[T any](old, new []T, cmp func(a, b T) int) (del, add []T) {
+	i, j := 0, 0
+	for i < len(old) && j < len(new) {
+		switch c := cmp(old[i], new[j]); {
+		case c < 0:
+			del = append(del, old[i])
+			i++
+		case c > 0:
+			add = append(add, new[j])
+			j++
+		default:
+			i++
+			j++
 		}
 	}
-	return 0
+	return append(del, old[i:]...), append(add, new[j:]...)
 }
 
 // SetPeers replaces the static peer set, starting and stopping sessions as
@@ -469,14 +471,46 @@ func (s *Server) SetPeers(peers []PeerConfig) {
 	s.mu.Unlock()
 
 	for _, p := range toStop {
+		if p.cfg.Password != "" {
+			_ = s.setListenerMD5(p.cfg.Neighbor, "") // remove; ENOENT is fine
+		}
 		p.stopLoop()
 		if sess := p.session.Load(); sess != nil {
 			sess.close(true)
 		}
 	}
 	for _, p := range toStart {
+		s.installMD5(p.cfg)
 		s.startPeer(p)
 	}
+}
+
+// installMD5 puts the peer's TCP MD5 key (RFC 2385) on the listening socket so
+// its inbound SYNs are signed and unsigned ones are dropped by the kernel.
+func (s *Server) installMD5(p PeerConfig) {
+	if p.Password == "" {
+		return
+	}
+	if err := s.setListenerMD5(p.Neighbor, p.Password); err != nil {
+		s.log.Printf("bgpserver: peer %s (%s): TCP MD5 on listener failed: %v", p.Name, p.Neighbor, err)
+	}
+}
+
+// setListenerMD5 sets (or with key "" removes) the MD5 key for neighbor on the
+// listener. It is a no-op before Start; Start installs keys itself.
+func (s *Server) setListenerMD5(neighbor, key string) error {
+	s.mu.Lock()
+	ln, network := s.ln, s.lnNetwork
+	s.mu.Unlock()
+	tl, ok := ln.(*net.TCPListener)
+	if !ok {
+		return nil
+	}
+	rc, err := tl.SyscallConn()
+	if err != nil {
+		return err
+	}
+	return setMD5(rc, network, netip.MustParseAddr(neighbor), key)
 }
 
 func samePeer(a, b PeerConfig) bool {
@@ -516,6 +550,14 @@ func (s *Server) maintainPeer(p *peerRuntime) {
 		case <-p.stop:
 			return
 		default:
+		}
+
+		if s.establishedWith(p.cfg.Neighbor) {
+			// The peer connected to us first; don't dial a colliding session.
+			if !s.sleepPeer(p, 3*time.Second) {
+				return
+			}
+			continue
 		}
 
 		conn, err := s.dialPeer(p.cfg)
@@ -559,6 +601,13 @@ func (s *Server) dialPeer(p PeerConfig) (net.Conn, error) {
 	}
 	addr := net.JoinHostPort(p.Neighbor, fmt.Sprintf("%d", port))
 	d := net.Dialer{Timeout: s.cfg.DialTimeout}
+	if p.Password != "" {
+		peer := netip.MustParseAddr(p.Neighbor)
+		// Fail the dial rather than connect unsigned: the peer would drop it.
+		d.Control = func(network, _ string, c syscall.RawConn) error {
+			return setMD5(c, network, peer, p.Password)
+		}
+	}
 	conn, err := d.DialContext(s.ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
@@ -627,18 +676,24 @@ func (s *Server) Addr() string {
 	return s.ln.Addr().String()
 }
 
-func (s *Server) collectSessionsLocked() []*session {
-	out := make([]*session, 0, len(s.sessions))
+// establishedWith reports whether an Established session with the static
+// neighbor ip exists, in either direction.
+func (s *Server) establishedWith(ip string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for sess := range s.sessions {
-		out = append(out, sess)
+		if sess.static != nil && sess.static.Neighbor == ip && sess.established.Load() {
+			return true
+		}
 	}
-	return out
+	return false
 }
 
-func (s *Server) routerID() netip.Addr {
-	if s.cfg.RouterID.IsValid() {
-		return s.cfg.RouterID
-	}
+func (s *Server) routerID() netip.Addr { return s.cfg.RouterID }
+
+// deriveRouterID picks the first non-loopback IPv4 address. It runs once in
+// New; set RTBH_BGP_ROUTER_ID in production so it is stable across hosts.
+func deriveRouterID() netip.Addr {
 	addrs, err := net.InterfaceAddrs()
 	if err == nil {
 		for _, a := range addrs {

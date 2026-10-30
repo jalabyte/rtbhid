@@ -56,8 +56,6 @@ func runAgent() {
 	bgpNexthopV6 := getEnv("RTBH_BGP_NEXTHOP_V6", "")
 	bgpHoldTime := getEnvInt("RTBH_BGP_HOLD_TIME_SEC", 90)
 	bgpEnableIPv6 := getEnvBool("RTBH_BGP_ENABLE_IPV6", true)
-	bgpMaxPrefixes := getEnvInt("RTBH_BGP_MAX_PREFIXES", 1000)
-	bgpMaxDynamic := getEnvInt("RTBH_BGP_MAX_DYNAMIC_PEERS", 256)
 
 	client, err := grpcclient.New(grpcclient.Config{
 		PortalURL:          portalURL,
@@ -79,8 +77,6 @@ func runAgent() {
 		BGPNexthopV6:       bgpNexthopV6,
 		BGPHoldTimeSec:     bgpHoldTime,
 		BGPEnableIPv6:      bgpEnableIPv6,
-		BGPMaxPrefixes:     bgpMaxPrefixes,
-		BGPMaxDynamic:      bgpMaxDynamic,
 		GRPCMaxRecvMsgSize: grpcMaxMsgSize,
 	})
 	if err != nil {
@@ -105,8 +101,6 @@ func runAgent() {
 		fmt.Printf("bgp next hop v4: %s\n", bgpNexthopV4)
 		fmt.Printf("bgp next hop v6: %s\n", bgpNexthopV6)
 		fmt.Printf("bgp hold time: %ds\n", bgpHoldTime)
-		fmt.Printf("bgp max prefixes: %d\n", bgpMaxPrefixes)
-		fmt.Printf("bgp max dynamic peers: %d\n", bgpMaxDynamic)
 	}
 	fmt.Printf("local ASN: %d\n", localASN)
 	fmt.Printf("export std communities: %s\n", exportStd)

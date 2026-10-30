@@ -46,8 +46,6 @@ type Config struct {
 	BGPNexthopV6   string
 	BGPHoldTimeSec int
 	BGPEnableIPv6  bool
-	BGPMaxPrefixes int
-	BGPMaxDynamic  int
 
 	// GRPCMaxRecvMsgSize is the maximum message size in bytes the client
 	// will accept. If 0, uses gRPC default (4MB).
@@ -87,8 +85,6 @@ func New(cfg Config) (*Client, error) {
 			NexthopV6:        cfg.BGPNexthopV6,
 			HoldTimeSec:      cfg.BGPHoldTimeSec,
 			EnableIPv6:       cfg.BGPEnableIPv6,
-			MaxPrefixes:      cfg.BGPMaxPrefixes,
-			MaxDynamic:       cfg.BGPMaxDynamic,
 			ExportStdComms:   cfg.ExportStdComms,
 			ExportLargeComms: cfg.ExportLargeComms,
 			Logger:           log.Default(),

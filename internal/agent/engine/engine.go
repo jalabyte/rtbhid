@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/netip"
 	"strings"
-	"sync"
 	"time"
 
 	"rtbhid/internal/agent/bird"
@@ -70,8 +69,6 @@ type CustomConfig struct {
 	NexthopV6        string
 	HoldTimeSec      int
 	EnableIPv6       bool
-	MaxPrefixes      int
-	MaxDynamic       int
 	ExportStdComms   string
 	ExportLargeComms string
 	Logger           *log.Logger
@@ -82,7 +79,6 @@ type Custom struct {
 	srv      *bgpserver.Server
 	localASN int
 	log      *log.Logger
-	md5Warn  sync.Once
 }
 
 // NewCustom starts the embedded BGP server.
@@ -92,15 +88,13 @@ func NewCustom(cfg CustomConfig) (*Custom, error) {
 		return nil, fmt.Errorf("parse export communities: %w", err)
 	}
 	bgpCfg := bgpserver.Config{
-		LocalASN:           uint32(cfg.LocalASN),
-		ListenAddr:         cfg.ListenAddr,
-		HoldTime:           time.Duration(cfg.HoldTimeSec) * time.Second,
-		StdCommunities:     toCommunities(exportPolicy.Standard),
-		LargeCommunities:   toLargeCommunities(exportPolicy.Large),
-		EnableIPv6:         cfg.EnableIPv6,
-		MaxPrefixes:        cfg.MaxPrefixes,
-		MaxDynamicSessions: cfg.MaxDynamic,
-		Logger:             cfg.Logger,
+		LocalASN:         uint32(cfg.LocalASN),
+		ListenAddr:       cfg.ListenAddr,
+		HoldTime:         time.Duration(cfg.HoldTimeSec) * time.Second,
+		StdCommunities:   toCommunities(exportPolicy.Standard),
+		LargeCommunities: toLargeCommunities(exportPolicy.Large),
+		EnableIPv6:       cfg.EnableIPv6,
+		Logger:           cfg.Logger,
 	}
 	if cfg.RouterID != "" {
 		addr, err := netip.ParseAddr(strings.TrimSpace(cfg.RouterID))
@@ -138,11 +132,6 @@ func NewCustom(cfg CustomConfig) (*Custom, error) {
 func (c *Custom) Apply(prefixes []string, peers []bird.Peer, allowedASNs []uint32, autoAccept bool) (bird.ApplyResult, error) {
 	peerCfg := make([]bgpserver.PeerConfig, 0, len(peers))
 	for _, p := range peers {
-		if strings.TrimSpace(p.Password) != "" {
-			c.md5Warn.Do(func() {
-				c.log.Printf("bgp engine custom: TCP MD5 passwords are not supported; peer %q will connect without MD5", p.Name)
-			})
-		}
 		peerCfg = append(peerCfg, bgpserver.PeerConfig{
 			ID:       p.ID,
 			Name:     p.Name,

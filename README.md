@@ -447,8 +447,6 @@ RTBH_BIRD_COMMAND='birdc -s /var/run/bird/bird.ctl configure' \
 | `RTBH_BGP_NEXTHOP_V6` | *(local addr)* | Next hop untuk announcement IPv6 |
 | `RTBH_BGP_HOLD_TIME_SEC` | `90` | Hold time BGP |
 | `RTBH_BGP_ENABLE_IPV6` | `true` | Advertise capability IPv6 unicast |
-| `RTBH_BGP_MAX_PREFIXES` | `1000` | Batas prefix yang diterima dari peer |
-| `RTBH_BGP_MAX_DYNAMIC_PEERS` | `256` | Batas sesi inbound auto-accept |
 
 ---
 
