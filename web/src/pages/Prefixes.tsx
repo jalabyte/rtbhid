@@ -1,81 +1,132 @@
-import { useEffect, useState } from 'react'
-import { api, type Prefix } from '@/lib/api'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Trash2, Plus } from 'lucide-react'
+import { useState } from "react";
+import { api, type Prefix } from "@/lib/api";
+import { useAction, useResource } from "@/hooks/use-api";
+import {
+  Confirm,
+  ErrorNote,
+  Field,
+  FormRow,
+  IconButton,
+  PageHeader,
+  StatusBadge,
+  TableState,
+} from "@/components/app";
+import { formatDate } from "@/lib/format";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Plus, Power, Trash2 } from "lucide-react";
 
 export default function Prefixes() {
-  const [prefixes, setPrefixes] = useState<Prefix[]>([])
-  const [cidr, setCidr] = useState('')
-  const [note, setNote] = useState('')
-
-  const load = () => api.getPrefixes().then(r => setPrefixes(r?.items ?? [])).catch(() => setPrefixes([]))
-
-  useEffect(() => { load() }, [])
+  const { data, error, loading, reload } = useResource(api.getPrefixes);
+  const action = useAction(reload);
+  const [cidr, setCidr] = useState("");
+  const [note, setNote] = useState("");
+  const prefixes: Prefix[] = data?.items ?? [];
 
   const handleAdd = async () => {
-    if (!cidr.trim()) return
-    await api.addPrefix({ cidr: cidr.trim(), note: note.trim() })
-    setCidr('')
-    setNote('')
-    load()
-  }
-
-  const handleDelete = async (id: number) => {
-    await api.deletePrefix(id)
-    load()
-  }
-
-  const handleToggle = async (p: Prefix) => {
-    await api.togglePrefix(p.id, !p.enabled)
-    load()
-  }
+    if (!cidr.trim()) return action.setError("CIDR is required");
+    const ok = await action.run(() =>
+      api.addPrefix({ cidr: cidr.trim(), note: note.trim() }),
+    );
+    if (ok) {
+      setCidr("");
+      setNote("");
+    }
+  };
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Prefixes</h2>
+    <div className="space-y-4">
+      <PageHeader
+        title="Prefixes"
+        description="Manually blackholed prefixes. Excludes do not apply to these."
+      />
 
-      <div className="flex gap-2">
-        <Input placeholder="CIDR (e.g. 192.0.2.0/24)" value={cidr} onChange={e => setCidr(e.target.value)} className="max-w-xs" />
-        <Input placeholder="Note (optional)" value={note} onChange={e => setNote(e.target.value)} className="max-w-xs" />
-        <Button onClick={handleAdd}><Plus className="h-4 w-4 mr-1" />Add</Button>
-      </div>
+      <FormRow onSubmit={handleAdd}>
+        <Field label="CIDR or IP" htmlFor="pfx-cidr">
+          <Input
+            id="pfx-cidr"
+            placeholder="192.0.2.0/24"
+            value={cidr}
+            onChange={(e) => setCidr(e.target.value)}
+            className="w-56 font-mono"
+          />
+        </Field>
+        <Field label="Note (optional)" htmlFor="pfx-note">
+          <Input
+            id="pfx-note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            className="w-64"
+          />
+        </Field>
+        <Button type="submit" disabled={action.busy}>
+          <Plus aria-hidden="true" />
+          Add prefix
+        </Button>
+      </FormRow>
+      <ErrorNote>{action.error}</ErrorNote>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>CIDR</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Note</TableHead>
-            <TableHead>Created</TableHead>
-            <TableHead className="w-24"></TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {prefixes.map(p => (
-            <TableRow key={p.id}>
-              <TableCell className="font-mono">{p.cidr}</TableCell>
-              <TableCell>
-                <Badge variant={p.enabled ? 'default' : 'secondary'} className="cursor-pointer" onClick={() => handleToggle(p)}>
-                  {p.enabled ? 'enabled' : 'disabled'}
-                </Badge>
-              </TableCell>
-              <TableCell>{p.note || '—'}</TableCell>
-              <TableCell>{new Date(p.created_at).toLocaleString()}</TableCell>
-              <TableCell>
-                <Button variant="ghost" size="icon" onClick={() => handleDelete(p.id)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </TableCell>
+      <div className="rounded-lg border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>CIDR</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Note</TableHead>
+              <TableHead>Created</TableHead>
+              <TableHead className="w-20 text-right">Actions</TableHead>
             </TableRow>
-          ))}
-          {prefixes.length === 0 && (
-            <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">No prefixes</TableCell></TableRow>
-          )}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {prefixes.map((p) => (
+              <TableRow key={p.id}>
+                <TableCell className="font-mono">{p.cidr}</TableCell>
+                <TableCell>
+                  <StatusBadge on={p.enabled} />
+                </TableCell>
+                <TableCell className="max-w-xs truncate">{p.note || "-"}</TableCell>
+                <TableCell>{formatDate(p.created_at)}</TableCell>
+                <TableCell>
+                  <div className="flex justify-end gap-1">
+                    <IconButton
+                      icon={Power}
+                      label={`${p.enabled ? "Disable" : "Enable"} ${p.cidr}`}
+                      aria-pressed={p.enabled}
+                      className={p.enabled ? "text-signal" : "text-muted-foreground"}
+                      disabled={action.busy}
+                      onClick={() => action.run(() => api.togglePrefix(p.id, !p.enabled))}
+                    />
+                    <Confirm
+                      title={`Delete ${p.cidr}?`}
+                      description="It is withdrawn from all routers on the next sync."
+                      confirmLabel="Delete prefix"
+                      onConfirm={() => action.run(() => api.deletePrefix(p.id))}
+                    >
+                      <IconButton icon={Trash2} label={`Delete ${p.cidr}`} />
+                    </Confirm>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            <TableState
+              colSpan={5}
+              loading={loading}
+              error={error}
+              empty={prefixes.length === 0}
+              emptyText="No manual prefixes."
+              onRetry={reload}
+            />
+          </TableBody>
+        </Table>
+      </div>
     </div>
-  )
+  );
 }

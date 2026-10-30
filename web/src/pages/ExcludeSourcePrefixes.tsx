@@ -9,8 +9,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ErrorNote, PageHeader, TableState } from "@/components/app";
+import { formatDate } from "@/lib/format";
 
 export default function ExcludeSourcePrefixes() {
   const [prefixes, setPrefixes] = useState<ExcludeSourcePrefix[]>([]);
@@ -52,22 +53,15 @@ export default function ExcludeSourcePrefixes() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-2">
-        <h2 className="text-2xl font-bold">Remote Exclusion Prefixes</h2>
-        <p className="text-muted-foreground">
-          View all exclusion prefixes synchronized from remote sources
-        </p>
-      </div>
-
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+    <div className="space-y-4">
+      <PageHeader
+        title="Remote Excludes"
+        description="Exclusion prefixes synchronized from remote exclude sources. Manage the sources under Excludes."
+      />
+      <ErrorNote>{error && prefixes.length > 0 ? error : ""}</ErrorNote>
 
       <div className="space-y-4">
-        <div className="border rounded-md">
+        <div className="rounded-lg border bg-card">
           <Table>
             <TableHeader>
               <TableRow>
@@ -77,40 +71,32 @@ export default function ExcludeSourcePrefixes() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading && prefixes.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={3} className="text-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
-                  </TableCell>
-                </TableRow>
-              ) : prefixes.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
-                    No prefixes found
-                  </TableCell>
-                </TableRow>
-              ) : (
-                prefixes.map((prefix, idx) => (
+              <TableState
+                colSpan={3}
+                loading={loading}
+                error={error ?? ""}
+                empty={prefixes.length === 0}
+                emptyText="No remote exclusion prefixes."
+                onRetry={fetchPrefixes}
+              />
+              {prefixes.map((prefix, idx) => (
                   <TableRow key={`${prefix.source_id}-${prefix.cidr}-${idx}`}>
                     <TableCell className="font-medium">
                       {prefix.source_name}
                     </TableCell>
                     <TableCell className="font-mono">{prefix.cidr}</TableCell>
-                    <TableCell>
-                      {new Date(prefix.created_at).toLocaleString()}
-                    </TableCell>
+                    <TableCell>{formatDate(prefix.created_at)}</TableCell>
                   </TableRow>
-                ))
-              )}
+                ))}
             </TableBody>
           </Table>
         </div>
 
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-muted-foreground">
             {total > 0 ? (
               <>
-                Showing {offset + 1} - {Math.min(offset + limit, total)} of {total}
+                Showing {offset + 1} to {Math.min(offset + limit, total)} of {total}
               </>
             ) : (
               "Showing 0 results"
@@ -123,7 +109,7 @@ export default function ExcludeSourcePrefixes() {
               onClick={handlePrevious}
               disabled={offset === 0 || loading}
             >
-              <ChevronLeft className="h-4 w-4 mr-1" />
+              <ChevronLeft aria-hidden="true" />
               Previous
             </Button>
             <Button
@@ -133,7 +119,7 @@ export default function ExcludeSourcePrefixes() {
               disabled={offset + limit >= total || loading}
             >
               Next
-              <ChevronRight className="h-4 w-4 ml-1" />
+              <ChevronRight aria-hidden="true" />
             </Button>
           </div>
         </div>

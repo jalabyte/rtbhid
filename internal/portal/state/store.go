@@ -34,6 +34,9 @@ func New(dbPath string) (*Store, error) {
 func (s *Store) migrate() error {
 	for _, sql := range migrations {
 		if _, err := s.db.Exec(sql); err != nil {
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
 			return err
 		}
 	}
@@ -73,7 +76,9 @@ func (s *Store) UpdateAgentHeartbeat(id string, status string, prefixCount int, 
 
 func (s *Store) ListAgents() []Agent {
 	rows, err := s.db.Query(`
-		SELECT id, name, hostname, bird_version, listen_addr, status, last_seen, created_at, updated_at
+		SELECT id, COALESCE(name, ''), COALESCE(hostname, ''), COALESCE(bird_version, ''),
+		       COALESCE(listen_addr, ''), COALESCE(status, 'offline'), last_seen,
+		       created_at, updated_at
 		FROM agents ORDER BY name`)
 	if err != nil {
 		return nil
@@ -94,7 +99,9 @@ func (s *Store) ListAgents() []Agent {
 func (s *Store) GetAgent(id string) (Agent, bool) {
 	var a Agent
 	err := s.db.QueryRow(`
-		SELECT id, name, hostname, bird_version, listen_addr, status, last_seen, created_at, updated_at
+		SELECT id, COALESCE(name, ''), COALESCE(hostname, ''), COALESCE(bird_version, ''),
+		       COALESCE(listen_addr, ''), COALESCE(status, 'offline'), last_seen,
+		       created_at, updated_at
 		FROM agents WHERE id = ?`, id).
 		Scan(&a.ID, &a.Name, &a.Hostname, &a.BirdVersion, &a.ListenAddr, &a.Status, &a.LastSeen, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
@@ -104,8 +111,22 @@ func (s *Store) GetAgent(id string) (Agent, bool) {
 }
 
 func (s *Store) DeleteAgent(id string) error {
-	_, err := s.db.Exec(`DELETE FROM agents WHERE id = ?`, id)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`DELETE FROM agent_bgp_sessions WHERE agent_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM agent_bgp_status WHERE agent_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM agents WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) MarkStaleAgents(timeout time.Duration) int {
@@ -229,7 +250,7 @@ func (s *Store) CreateSource(src Source) error {
 }
 
 func (s *Store) ListSources() []Source {
-	rows, err := s.db.Query(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at FROM sources ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at, COALESCE(last_error, '') FROM sources ORDER BY name`)
 	if err != nil {
 		return nil
 	}
@@ -238,7 +259,7 @@ func (s *Store) ListSources() []Source {
 	var out []Source
 	for rows.Next() {
 		var src Source
-		if err := rows.Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt); err != nil {
+		if err := rows.Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt, &src.LastError); err != nil {
 			continue
 		}
 		out = append(out, src)
@@ -248,8 +269,8 @@ func (s *Store) ListSources() []Source {
 
 func (s *Store) GetSource(id string) (Source, bool) {
 	var src Source
-	err := s.db.QueryRow(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at FROM sources WHERE id = ?`, id).
-		Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at, COALESCE(last_error, '') FROM sources WHERE id = ?`, id).
+		Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt, &src.LastError)
 	if err != nil {
 		return Source{}, false
 	}
@@ -302,9 +323,16 @@ func (s *Store) ReplaceSourcePrefixes(sourceID string, cidrs []string) error {
 	return tx.Commit()
 }
 
+// SetSourceSyncError records why the latest sync failed; the previous
+// prefixes and last_sync stay in place.
+func (s *Store) SetSourceSyncError(id, msg string) error {
+	_, err := s.db.Exec(`UPDATE sources SET last_error = ? WHERE id = ?`, msg, id)
+	return err
+}
+
 func (s *Store) SetSourceSyncResult(id string, count int) error {
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE sources SET last_sync = ?, last_count = ? WHERE id = ?`, now, count, id)
+	_, err := s.db.Exec(`UPDATE sources SET last_sync = ?, last_count = ?, last_error = '' WHERE id = ?`, now, count, id)
 	return err
 }
 
@@ -529,7 +557,7 @@ func (s *Store) CreateExcludeSource(src Source) error {
 }
 
 func (s *Store) ListExcludeSources() []Source {
-	rows, err := s.db.Query(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at FROM exclude_sources ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at, COALESCE(last_error, '') FROM exclude_sources ORDER BY name`)
 	if err != nil {
 		return nil
 	}
@@ -538,7 +566,7 @@ func (s *Store) ListExcludeSources() []Source {
 	var out []Source
 	for rows.Next() {
 		var src Source
-		if err := rows.Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt); err != nil {
+		if err := rows.Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt, &src.LastError); err != nil {
 			continue
 		}
 		out = append(out, src)
@@ -548,8 +576,8 @@ func (s *Store) ListExcludeSources() []Source {
 
 func (s *Store) GetExcludeSource(id string) (Source, bool) {
 	var src Source
-	err := s.db.QueryRow(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at FROM exclude_sources WHERE id = ?`, id).
-		Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, name, url, interval, enabled, last_sync, last_count, created_at, COALESCE(last_error, '') FROM exclude_sources WHERE id = ?`, id).
+		Scan(&src.ID, &src.Name, &src.URL, &src.Interval, &src.Enabled, &src.LastSync, &src.LastCount, &src.CreatedAt, &src.LastError)
 	if err != nil {
 		return Source{}, false
 	}
@@ -594,9 +622,14 @@ func (s *Store) ReplaceExcludeSourcePrefixes(sourceID string, cidrs []string) er
 	return tx.Commit()
 }
 
+func (s *Store) SetExcludeSourceSyncError(id, msg string) error {
+	_, err := s.db.Exec(`UPDATE exclude_sources SET last_error = ? WHERE id = ?`, msg, id)
+	return err
+}
+
 func (s *Store) SetExcludeSourceSyncResult(id string, count int) error {
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE exclude_sources SET last_sync = ?, last_count = ? WHERE id = ?`, now, count, id)
+	_, err := s.db.Exec(`UPDATE exclude_sources SET last_sync = ?, last_count = ?, last_error = '' WHERE id = ?`, now, count, id)
 	return err
 }
 
@@ -663,6 +696,309 @@ func (s *Store) TogglePeer(id string, enabled bool) error {
 }
 
 // --------------------------------------------------------------------------
+// ASN whitelist CRUD
+// --------------------------------------------------------------------------
+
+func (s *Store) ListWhitelistASNs() []WhitelistASN {
+	rows, err := s.db.Query(`
+		SELECT id, asn, COALESCE(name, ''), COALESCE(country, ''), COALESCE(source, ''), enabled, created_at
+		FROM asn_whitelist ORDER BY asn`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var out []WhitelistASN
+	for rows.Next() {
+		var w WhitelistASN
+		if err := rows.Scan(&w.ID, &w.ASN, &w.Name, &w.Country, &w.Source, &w.Enabled, &w.CreatedAt); err != nil {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// ListEnabledWhitelistASNs returns the ASNs pushed to agents for auto-accept.
+func (s *Store) ListEnabledWhitelistASNs() []uint32 {
+	rows, err := s.db.Query(`SELECT asn FROM asn_whitelist WHERE enabled = 1 ORDER BY asn`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var out []uint32
+	for rows.Next() {
+		var asn uint32
+		if err := rows.Scan(&asn); err == nil {
+			out = append(out, asn)
+		}
+	}
+	return out
+}
+
+func (s *Store) GetWhitelistASN(asn uint32) (WhitelistASN, bool) {
+	var w WhitelistASN
+	err := s.db.QueryRow(`
+		SELECT id, asn, COALESCE(name, ''), COALESCE(country, ''), COALESCE(source, ''), enabled, created_at
+		FROM asn_whitelist WHERE asn = ?`, asn).
+		Scan(&w.ID, &w.ASN, &w.Name, &w.Country, &w.Source, &w.Enabled, &w.CreatedAt)
+	if err != nil {
+		return WhitelistASN{}, false
+	}
+	return w, true
+}
+
+func (s *Store) CreateWhitelistASN(w WhitelistASN) (WhitelistASN, error) {
+	if w.CreatedAt.IsZero() {
+		w.CreatedAt = time.Now().UTC()
+	}
+	if w.Country == "" {
+		w.Country = "ID"
+	}
+	if w.Source == "" {
+		w.Source = "manual"
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO asn_whitelist (id, asn, name, country, source, enabled, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.ASN, w.Name, w.Country, w.Source, w.Enabled, w.CreatedAt,
+	)
+	if err != nil {
+		return WhitelistASN{}, err
+	}
+	return w, nil
+}
+
+// UpsertWhitelistASN inserts the entry when the ASN is not present. It never
+// changes an existing entry's enabled state. The boolean reports whether a new
+// row was created.
+func (s *Store) UpsertWhitelistASN(w WhitelistASN) (bool, error) {
+	if w.CreatedAt.IsZero() {
+		w.CreatedAt = time.Now().UTC()
+	}
+	if w.Country == "" {
+		w.Country = "ID"
+	}
+	if w.Source == "" {
+		w.Source = "apnic"
+	}
+	res, err := s.db.Exec(`
+		INSERT OR IGNORE INTO asn_whitelist (id, asn, name, country, source, enabled, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.ASN, w.Name, w.Country, w.Source, w.Enabled, w.CreatedAt,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+func (s *Store) DeleteWhitelistASN(id string) error {
+	res, err := s.db.Exec(`DELETE FROM asn_whitelist WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("whitelist entry %q not found", id)
+	}
+	return nil
+}
+
+func (s *Store) DeleteWhitelistASNByASN(asn uint32) error {
+	_, err := s.db.Exec(`DELETE FROM asn_whitelist WHERE asn = ?`, asn)
+	return err
+}
+
+func (s *Store) ToggleWhitelistASN(id string, enabled bool) error {
+	res, err := s.db.Exec(`UPDATE asn_whitelist SET enabled = ? WHERE id = ?`, enabled, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("whitelist entry %q not found", id)
+	}
+	return nil
+}
+
+// ReplaceWhitelistBySource removes entries from the given source and inserts
+// the supplied entries. Manual entries are never touched.
+func (s *Store) ReplaceWhitelistBySource(source string, entries []WhitelistASN) (int, error) {
+	return s.ReplaceWhitelistBySources([]string{source}, entries)
+}
+
+// ReplaceWhitelistBySources removes entries from any of the given source
+// buckets and inserts the supplied entries. Manual entries are never touched.
+func (s *Store) ReplaceWhitelistBySources(sources []string, entries []WhitelistASN) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, source := range sources {
+		if source == "" {
+			continue
+		}
+		if _, err := tx.Exec(`DELETE FROM asn_whitelist WHERE source = ?`, source); err != nil {
+			return 0, err
+		}
+	}
+	created := 0
+	for _, w := range entries {
+		if w.CreatedAt.IsZero() {
+			w.CreatedAt = time.Now().UTC()
+		}
+		if w.Country == "" {
+			w.Country = "ID"
+		}
+		if w.Source == "" && len(sources) > 0 {
+			w.Source = sources[0]
+		}
+		res, err := tx.Exec(`
+			INSERT OR IGNORE INTO asn_whitelist (id, asn, name, country, source, enabled, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			w.ID, w.ASN, w.Name, w.Country, w.Source, w.Enabled, w.CreatedAt,
+		)
+		if err != nil {
+			return created, err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			created++
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return created, err
+	}
+	return created, nil
+}
+
+func (s *Store) CountWhitelistASNs() int {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM asn_whitelist`).Scan(&n)
+	return n
+}
+
+// --------------------------------------------------------------------------
+// Indonesian ASN registry cache (authoritative country-ID ASN set)
+// --------------------------------------------------------------------------
+
+func (s *Store) ReplaceIDASNRegistry(asns []uint32) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`DELETE FROM id_asn_registry`); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, asn := range asns {
+		if asn == 0 {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO id_asn_registry (asn, updated_at) VALUES (?, ?)`, asn, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CountIDASNRegistry() int {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM id_asn_registry`).Scan(&n)
+	return n
+}
+
+func (s *Store) IsIDASNRegistered(asn uint32) bool {
+	var found int
+	err := s.db.QueryRow(`SELECT 1 FROM id_asn_registry WHERE asn = ?`, asn).Scan(&found)
+	return err == nil
+}
+
+// --------------------------------------------------------------------------
+// BGP telemetry
+// --------------------------------------------------------------------------
+
+// ReplaceAgentBGPSessions atomically replaces the reported sessions for an
+// agent and records the engine name.
+func (s *Store) ReplaceAgentBGPSessions(agentID, engine string, sessions []BGPSession) error {
+	now := time.Now().UTC()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`
+		INSERT INTO agent_bgp_status (agent_id, engine, updated_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(agent_id) DO UPDATE SET engine = excluded.engine, updated_at = excluded.updated_at`,
+		agentID, engine, now); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM agent_bgp_sessions WHERE agent_id = ?`, agentID); err != nil {
+		return err
+	}
+	for _, sess := range sessions {
+		if sess.Peer == "" {
+			continue
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO agent_bgp_sessions (agent_id, peer, name, remote_as, local_as, state, passive, uptime_sec, prefixes_in, prefixes_out, last_error, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			agentID, sess.Peer, sess.Name, sess.RemoteAS, sess.LocalAS, sess.State,
+			sess.Passive, sess.UptimeSec, sess.PrefixesIn, sess.PrefixesOut, sess.LastError, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListAgentBGPSessions() []BGPSession {
+	rows, err := s.db.Query(`
+		SELECT b.agent_id, COALESCE(a.name, ''), b.peer, COALESCE(b.name, ''), b.remote_as, b.local_as,
+		       COALESCE(b.state, ''), b.passive, b.uptime_sec, b.prefixes_in, COALESCE(b.prefixes_out, 0), COALESCE(b.last_error, ''), b.updated_at
+		FROM agent_bgp_sessions b
+		LEFT JOIN agents a ON a.id = b.agent_id
+		ORDER BY a.name, b.peer`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var out []BGPSession
+	for rows.Next() {
+		var sess BGPSession
+		if err := rows.Scan(&sess.AgentID, &sess.AgentName, &sess.Peer, &sess.Name, &sess.RemoteAS, &sess.LocalAS,
+			&sess.State, &sess.Passive, &sess.UptimeSec, &sess.PrefixesIn, &sess.PrefixesOut, &sess.LastError, &sess.UpdatedAt); err != nil {
+			continue
+		}
+		out = append(out, sess)
+	}
+	return out
+}
+
+// AgentBGPEngines returns agentID -> engine name and last report time.
+func (s *Store) AgentBGPEngines() map[string]string {
+	rows, err := s.db.Query(`SELECT agent_id, COALESCE(engine, '') FROM agent_bgp_status`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var id, engine string
+		if err := rows.Scan(&id, &engine); err == nil {
+			out[id] = engine
+		}
+	}
+	return out
+}
+
+// --------------------------------------------------------------------------
 // Event CRUD
 // --------------------------------------------------------------------------
 
@@ -698,6 +1034,22 @@ func (s *Store) ListEvents(limit int) []Event {
 // --------------------------------------------------------------------------
 // EffectivePrefixes - core aggregation logic
 // --------------------------------------------------------------------------
+
+// Shortest prefixes the feed will carry. A default route or a /1 in a remote
+// list (broken or hostile) would otherwise tell every router to blackhole the
+// internet. Receivers should enforce the same floor (see the Docs page).
+const (
+	MinFeedBitsV4 = 8
+	MinFeedBitsV6 = 16
+)
+
+// FeedSafe reports whether p is narrow enough to announce as a blackhole.
+func FeedSafe(p netip.Prefix) bool {
+	if p.Addr().Is4() {
+		return p.Bits() >= MinFeedBitsV4
+	}
+	return p.Bits() >= MinFeedBitsV6
+}
 
 func (s *Store) EffectivePrefixes() []string {
 	// 1. Collect enabled manual prefixes
@@ -771,9 +1123,12 @@ func (s *Store) EffectivePrefixes() []string {
 		result[cidr] = true
 	}
 
-	// 5. Sort and return
+	// 5. Sort and return, dropping anything too wide to be a blackhole target
 	out := make([]string, 0, len(result))
 	for cidr := range result {
+		if pref, err := netip.ParsePrefix(cidr); err == nil && !FeedSafe(pref) {
+			continue
+		}
 		out = append(out, cidr)
 	}
 	sort.Strings(out)
@@ -836,10 +1191,8 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 			if storedPrefix, err := netip.ParsePrefix(cidr); err == nil {
 				var matched bool
 				if isQueryCIDR {
-					// Query is CIDR: check if stored prefix is a sub-prefix of query prefix
-					// i.e., query prefix contains stored prefix's network
-					matched = queryPrefix.Bits() <= storedPrefix.Bits() &&
-						queryPrefix.Contains(storedPrefix.Addr())
+					// Query is CIDR: match prefixes inside it and prefixes covering it
+					matched = queryPrefix.Overlaps(storedPrefix)
 				} else {
 					// Query is bare IP: check if stored prefix contains the IP
 					matched = storedPrefix.Contains(queryAddr)
@@ -873,9 +1226,8 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 			if storedPrefix, err := netip.ParsePrefix(cidr); err == nil {
 				var matched bool
 				if isQueryCIDR {
-					// Query is CIDR: check if stored prefix is a sub-prefix of query prefix
-					matched = queryPrefix.Bits() <= storedPrefix.Bits() &&
-						queryPrefix.Contains(storedPrefix.Addr())
+					// Query is CIDR: match prefixes inside it and prefixes covering it
+					matched = queryPrefix.Overlaps(storedPrefix)
 				} else {
 					// Query is bare IP: check if stored prefix contains the IP
 					matched = storedPrefix.Contains(queryAddr)
@@ -907,8 +1259,7 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 
 						var matched bool
 						if isQueryCIDR {
-							matched = queryPrefix.Bits() <= pref.Bits() &&
-								queryPrefix.Contains(pref.Addr())
+							matched = queryPrefix.Overlaps(pref)
 						} else {
 							matched = pref.Contains(queryAddr)
 						}
@@ -942,8 +1293,7 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 
 						var matched bool
 						if isQueryCIDR {
-							matched = queryPrefix.Bits() <= pref.Bits() &&
-								queryPrefix.Contains(pref.Addr())
+							matched = queryPrefix.Overlaps(pref)
 						} else {
 							matched = pref.Contains(queryAddr)
 						}
@@ -964,7 +1314,9 @@ func (s *Store) LookupIP(queries []string) ([]LookupResult, error) {
 
 		filteredMatches := make([]LookupMatch, 0, len(matches))
 		for _, match := range matches {
-			if match.Type == "exclude" {
+			// Excludes only override source prefixes; manual prefixes are
+			// always in the feed (see EffectivePrefixes).
+			if match.Type == "exclude" || match.Type == "manual" {
 				filteredMatches = append(filteredMatches, match)
 				continue
 			}

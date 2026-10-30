@@ -12,7 +12,8 @@ RTBHID is a **Remotely Triggered Black Hole (RTBH) controller** for DDoS mitigat
 |------|--------|---------|-------------|
 | **Standalone** | `rtbhd` | JSON file (`state.json`) | Single BIRD instance, no network agents. Legacy mode. |
 | **Portal** | `rtbh-portal` | SQLite (`portal.db`) | Central dashboard managing multiple agents over gRPC. |
-| **Agent** | `rtbhd` (with `RTBH_MODE=agent`) | None | Connects to portal via gRPC, applies config to local BIRD. |
+| **Agent (BIRD)** | `rtbhd` (with `RTBH_MODE=agent`) | None | Connects to portal via gRPC, applies config to local BIRD. |
+| **Agent (embedded BGP)** | `rtbhd` with `RTBH_BGP_ENGINE=custom` | None | Runs the built-in BGP speaker instead of BIRD. |
 
 The `cmd/agent/main.go` binary supports both standalone and agent mode via the `RTBH_MODE` env var.
 
@@ -39,8 +40,10 @@ rtbhid/
 │   │       └── migrations.go   # Schema (CREATE TABLE IF NOT EXISTS)
 │   ├── agent/
 │   │   ├── config/config.go    # Agent config loader
+│   │   ├── engine/engine.go    # BIRD vs embedded BGP engine abstraction
 │   │   ├── grpcclient/client.go # gRPC client (connects to portal)
 │   │   └── bird/manager.go     # Bird config file writer
+│   ├── bgpserver/              # Embedded BGP-4 speaker (messages, sessions, allowlist)
 │   ├── app/service.go          # Standalone business logic
 │   ├── bird/manager.go         # Bird config generation (standalone)
 │   ├── config/config.go        # Standalone config loader
@@ -49,6 +52,7 @@ rtbhid/
 │   ├── shared/types.go         # Shared types (mostly empty)
 │   └── syncer/syncer.go        # URL fetcher for prefix sources
 ├── gen/rtbhid/                  # Generated gRPC protobuf code
+├── internal/portal/id_asns.go  # Multi-RIR Indonesian ASN registry importer
 ├── proto/
 │   ├── rtbhid.proto            # gRPC service definition
 │   └── buf.yaml                # buf config
@@ -131,6 +135,12 @@ npm run dev         # Vite dev server (proxies API to :8088)
 | `RTBH_DB_PATH` | `./data/portal.db` | SQLite database path |
 | `RTBH_LOCAL_ASN` | `65500` | Local AS number |
 | `RTBH_SCHEDULER_TICK_SECONDS` | `15` | Source sync interval check |
+| `RTBH_BGP_AUTO_ACCEPT` | `true` | Allow agents to auto-accept whitelisted ASNs |
+| `RTBH_WHITELIST_STRICT_ID` | `true` | Require manual ASN adds to exist in the RIR country-ID registry |
+| `RTBH_ID_ASN_SOURCE_URL` | all RIRs | Override one Indonesian ASN source URL |
+| `RTBH_ID_ASN_SOURCE_URLS` | all RIRs | Comma-separated source URL list |
+| `RTBH_ASN_NAME_SOURCE_URL` | bgp.tools CSV | ASN holder-name source (fallback: iptoasn, RIPE asn.txt) |
+| `RTBH_METRICS_TOKEN` | *(public)* | Optional bearer token for `/metrics` |
 | `RTBH_AUTH_USER` | *(disabled)* | Auth username (enables auth) |
 | `RTBH_AUTH_PASS` | *(disabled)* | Auth password |
 | `RTBH_AUTH_SESSION_SECRET` | | HMAC-SHA256 session signing key |
@@ -149,6 +159,13 @@ npm run dev         # Vite dev server (proxies API to :8088)
 | `RTBH_BIRD_PEERS_OUTPUT` | `./data/rtbh_peers_auto.conf` | BIRD peers config output |
 | `RTBH_BIRD_RELOAD` | `false` | Auto-reload BIRD after config change |
 | `RTBH_BIRD_COMMAND` | `birdc configure` | BIRD reload command |
+| `RTBH_BGP_ENGINE` | `bird` | `bird` or `custom` (embedded BGP server) |
+| `RTBH_BGP_LISTEN_ADDR` | `:179` | Embedded BGP listen address |
+| `RTBH_BGP_ROUTER_ID` | auto | BGP router ID (IPv4) |
+| `RTBH_BGP_NEXTHOP_V4` | local addr | IPv4 announcement next hop |
+| `RTBH_BGP_NEXTHOP_V6` | local addr | IPv6 announcement next hop |
+| `RTBH_BGP_HOLD_TIME_SEC` | `90` | BGP hold time |
+| `RTBH_BGP_ENABLE_IPV6` | `true` | Advertise IPv6 unicast capability |
 | `RTBH_STATE_PATH` | `./data/state.json` | JSON state file (standalone) |
 | `RTBH_EXPORT_STD_COMMUNITIES` | | Standard BGP communities for export |
 | `RTBH_EXPORT_LARGE_COMMUNITIES` | | Large BGP communities for export |
@@ -158,7 +175,7 @@ npm run dev         # Vite dev server (proxies API to :8088)
 
 ## Database Schema (SQLite — Portal)
 
-8 tables defined in `internal/portal/state/migrations.go`:
+Tables defined in `internal/portal/state/migrations.go`:
 
 | Table | Key | Description |
 |-------|-----|-------------|
@@ -171,6 +188,9 @@ npm run dev         # Vite dev server (proxies API to :8088)
 | `exclude_source_prefixes` | `(source_id, cidr)` | Synced prefixes from exclude sources |
 | `peers` | `id TEXT PK` | BGP peer configurations |
 | `events` | `id INTEGER PK` | Audit log / event stream |
+| `asn_whitelist` | `id TEXT PK` | ASNs allowed for inbound auto-accept peering |
+| `agent_bgp_status` | `agent_id TEXT PK` | BGP engine name per agent |
+| `agent_bgp_sessions` | `(agent_id, peer)` | Live BGP session telemetry |
 
 ### Effective Prefixes Logic
 
@@ -208,6 +228,13 @@ All under `/api/v1/` (except auth/login). Full list from `server.go`:
 | GET/POST | `/peers` | List/create peers |
 | PUT/DELETE | `/peers/:id` | Update/delete peer |
 | GET | `/events?limit=N` | Recent events (default 100) |
+| GET | `/bgp` | BGP telemetry summary and sessions across agents |
+| GET/POST | `/whitelist` | List or add ASN whitelist entries |
+| DELETE | `/whitelist/:id` | Remove an ASN whitelist entry |
+| PUT | `/whitelist/:id/toggle` | Enable/disable an entry |
+| PUT | `/whitelist/auto-accept` | Toggle agent auto-accept |
+| POST | `/whitelist/import` | Import Indonesian ASNs from all RIRs |
+| GET | `/metrics` | Prometheus metrics (public unless `RTBH_METRICS_TOKEN` is set) |
 | POST | `/register` | Agent registration |
 | POST | `/heartbeat` | Agent heartbeat |
 | GET | `/config?agentID=X` | Long-poll config updates |
@@ -265,6 +292,8 @@ service Portal {
 | `/sources` | Sources | `src/pages/Sources.tsx` |
 | `/excludes` | Excludes | `src/pages/Excludes.tsx` |
 | `/peers` | Peers | `src/pages/Peers.tsx` |
+| `/whitelist` | ASN Whitelist | `src/pages/Whitelist.tsx` |
+| `/bgp` | BGP Monitor | `src/pages/BGPMonitor.tsx` |
 | `/events` | Events | `src/pages/Events.tsx` |
 
 All API calls go through `src/lib/api.ts` which exports an `api` object with typed methods for every endpoint.
@@ -298,6 +327,9 @@ Two service files in `deploy/systemd/`:
 
 ## Recent Changes (Completed)
 
+- **Embedded BGP server** — `internal/bgpserver` implements BGP-4 OPEN/KEEPALIVE/UPDATE, IPv4/IPv6 announcements, standard + large communities, AS4 capability, static peers, and inbound sessions auto-accepted by ASN. Selected with `RTBH_BGP_ENGINE=custom`.
+- **ASN whitelist** — Portal stores `asn_whitelist`, imports Indonesian ASN delegations from all five RIRs (`internal/portal/id_asns.go`), and pushes the enabled list to agents. New **ASN Whitelist** dashboard page.
+- **BGP observability** — Agents report live sessions in heartbeats every 15 seconds. Portal stores them in `agent_bgp_sessions`/`agent_bgp_status`, exposes `GET /api/v1/bgp` and Prometheus `GET /metrics`. New **BGP Monitor** page with live refresh, filters, stale detection, and per-agent engine info.
 - **Exclude sources** — Added remote URL-based exclude lists with sync scheduler, mirroring the existing source pattern. Tables: `exclude_sources`, `exclude_source_prefixes`.
 - **Portal auth** — Ported auth system from standalone to portal. Login page, session cookies, auth middleware.
 - **Source ID auto-generation** — Backend generates IDs; frontend removed manual ID input field.
@@ -319,3 +351,5 @@ Two service files in `deploy/systemd/`:
 4. **Adding a new React page** — Create `web/src/pages/NewPage.tsx`, add route in `web/src/App.tsx`, add nav item in `web/src/components/layout/Sidebar.tsx`.
 
 5. **Building for deployment** — Run `make portal` (builds web + Go binary), copy `bin/rtbh-portal` to server, set up systemd service with env file.
+
+6. **Working on the embedded BGP engine** — Code lives in `internal/bgpserver` (`message.go` codec, `server.go` listener/peer reconciliation, `session.go` FSM/router sync). Unit and loopback tests are in `bgp_test.go`. Agent wiring is in `internal/agent/engine/engine.go` and `internal/agent/grpcclient/client.go`.

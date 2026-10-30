@@ -10,8 +10,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight, ArrowLeft } from "lucide-react";
+import { ErrorNote, PageHeader, StatusBadge } from "@/components/app";
 
 interface PrefixesResponse {
   items: string[];
@@ -78,37 +78,31 @@ export default function SourcePrefixes() {
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Sources
         </Button>
-        <div className="text-destructive">{error}</div>
+        <ErrorNote>{error}</ErrorNote>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" onClick={() => navigate("/sources")}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back
-        </Button>
-        <div>
-          <h2 className="text-2xl font-bold">
-            {source ? source.name || source.id : "Loading..."}
-          </h2>
-          <p className="text-muted-foreground text-sm">
-            {source && (
-              <>
-                <span className="font-mono">{source.url}</span>
-                <Badge variant={source.enabled ? "default" : "secondary"} className="ml-2">
-                  {source.enabled ? "active" : "inactive"}
-                </Badge>
-              </>
-            )}
-          </p>
-        </div>
-      </div>
+    <div className="space-y-4">
+      <Button variant="ghost" size="sm" className="-ml-2" onClick={() => navigate("/sources")}>
+        <ArrowLeft aria-hidden="true" />
+        Sources
+      </Button>
+      <PageHeader
+        title={source ? source.name || source.id : "Loading…"}
+        description={
+          source && (
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs break-all">{source.url}</span>
+              <StatusBadge on={source.enabled} onLabel="active" offLabel="inactive" />
+            </span>
+          )
+        }
+      />
 
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-muted-foreground">
             {data ? (
               <>
@@ -117,7 +111,7 @@ export default function SourcePrefixes() {
                 <span className="font-medium">{data.total}</span> prefixes
               </>
             ) : (
-              "Loading..."
+              "Loading…"
             )}
           </p>
           <div className="flex items-center gap-2">
@@ -126,8 +120,9 @@ export default function SourcePrefixes() {
               size="sm"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={loading || page <= 1}
+              aria-label="Previous page"
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft aria-hidden="true" />
             </Button>
             <span className="text-sm text-muted-foreground min-w-[100px] text-center">
               Page {page} of {totalPages || 1}
@@ -137,12 +132,14 @@ export default function SourcePrefixes() {
               size="sm"
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={loading || page >= totalPages}
+              aria-label="Next page"
             >
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight aria-hidden="true" />
             </Button>
           </div>
         </div>
 
+        <div className="rounded-lg border bg-card">
         <Table>
           <TableHeader>
             <TableRow>
@@ -154,7 +151,7 @@ export default function SourcePrefixes() {
             {loading ? (
               <TableRow>
                 <TableCell colSpan={2} className="text-center text-muted-foreground">
-                  Loading...
+                  Loading…
                 </TableCell>
               </TableRow>
             ) : data?.items.length === 0 ? (
@@ -175,6 +172,7 @@ export default function SourcePrefixes() {
             )}
           </TableBody>
         </Table>
+        </div>
       </div>
     </div>
   );

@@ -7,3 +7,9 @@ rtbhd
 /data/*.db
 .DS_Store
 .sisyphus/
+.opencode/
+CLAUDE.md
+
+# Production runbooks and host-specific installers stay local (IPs, hostnames, backup paths).
+docs/deploy-*.md
+scripts/install-*.sh

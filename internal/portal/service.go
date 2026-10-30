@@ -3,8 +3,12 @@ package portal
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,22 +25,94 @@ type Service struct {
 	localASN  int
 	tickSec   int
 	asnLookup *ASNLookup
+	idASNs    *IDASNRegistry
+	asnNames  *ASNNameRegistry
+
+	// autoAccept controls whether agents accept inbound BGP sessions from
+	// whitelisted ASNs.
+	autoAccept bool
+	// strictID requires manually added ASNs to exist in the cached APNIC
+	// country-ID registry.
+	strictID bool
 
 	// Agent config streams: agentID -> channel
 	mu      sync.RWMutex
 	streams map[string]chan *pb.ConfigUpdate
 	version int64
+
+	backoff syncBackoff
 }
 
 func NewService(store *state.Store, fetcher *syncer.Fetcher, localASN int, tickSec int, ipinfoToken string) *Service {
 	return &Service{
-		store:     store,
-		fetcher:   fetcher,
-		localASN:  localASN,
-		tickSec:   tickSec,
-		asnLookup: NewASNLookup(ipinfoToken),
-		streams:   make(map[string]chan *pb.ConfigUpdate),
+		store:      store,
+		fetcher:    fetcher,
+		localASN:   localASN,
+		tickSec:    tickSec,
+		asnLookup:  NewASNLookup(ipinfoToken),
+		idASNs:     NewIDASNRegistry(""),
+		asnNames:   NewASNNameRegistry(""),
+		autoAccept: true,
+		strictID:   true,
+		streams:    make(map[string]chan *pb.ConfigUpdate),
+		backoff:    newSyncBackoff(),
 	}
+}
+
+// SetAutoAccept enables or disables agent auto-accept of whitelisted ASNs.
+func (s *Service) SetAutoAccept(enabled bool) {
+	s.mu.Lock()
+	s.autoAccept = enabled
+	s.mu.Unlock()
+	s.PushConfigToAll()
+}
+
+// AutoAcceptEnabled reports the current auto-accept policy.
+func (s *Service) AutoAcceptEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.autoAccept
+}
+
+// SetIDASNSourceURL overrides the RIR registry URL.
+func (s *Service) SetIDASNSourceURL(url string) {
+	s.idASNs = NewIDASNRegistry(url)
+}
+
+// SetIDASNSourceURLs overrides the RIR registry URLs. Empty input uses the
+// built-in union of all five RIR delegation files.
+func (s *Service) SetIDASNSourceURLs(urls []string) {
+	s.idASNs = NewIDASNRegistryURLs(urls)
+}
+
+// SetASNNameSourceURL overrides the ASN holder-name dataset URL.
+func (s *Service) SetASNNameSourceURL(url string) {
+	s.asnNames = NewASNNameRegistry(url)
+}
+
+// SetStrictIDWhitelist controls whether manual whitelist additions must exist
+// in the cached RIR country-ID ASN registry.
+func (s *Service) SetStrictIDWhitelist(strict bool) {
+	s.mu.Lock()
+	s.strictID = strict
+	s.mu.Unlock()
+}
+
+// StrictIDWhitelist reports the current validation policy.
+func (s *Service) StrictIDWhitelist() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.strictID
+}
+
+// IDASNRegistryCount returns the number of cached Indonesian ASNs.
+func (s *Service) IDASNRegistryCount() int {
+	return s.store.CountIDASNRegistry()
+}
+
+// IDASNWarnings returns non-fatal RIR source failures from the last import.
+func (s *Service) IDASNWarnings() []string {
+	return s.idASNs.Warnings()
 }
 
 // Start begins the source sync scheduler goroutine.
@@ -115,6 +191,7 @@ func (s *Service) buildConfigUpdate() *pb.ConfigUpdate {
 	s.mu.Lock()
 	s.version++
 	ver := s.version
+	autoAccept := s.autoAccept
 	s.mu.Unlock()
 
 	prefixes := s.store.EffectivePrefixes()
@@ -139,9 +216,11 @@ func (s *Service) buildConfigUpdate() *pb.ConfigUpdate {
 	}
 
 	return &pb.ConfigUpdate{
-		Prefixes: prefixes,
-		Peers:    peers,
-		Version:  ver,
+		Prefixes:    prefixes,
+		Peers:       peers,
+		Version:     ver,
+		AllowedAsns: s.store.ListEnabledWhitelistASNs(),
+		AutoAccept:  autoAccept,
 	}
 }
 
@@ -266,6 +345,127 @@ func (s *Service) TogglePeer(id string, enabled bool) error {
 	return nil
 }
 
+// ---------------------------------------------------------------------------
+// ASN whitelist (auto-accept peers)
+// ---------------------------------------------------------------------------
+
+func (s *Service) ListWhitelistASNs() []state.WhitelistASN {
+	return s.store.ListWhitelistASNs()
+}
+
+func (s *Service) GetWhitelistCount() int {
+	return s.store.CountWhitelistASNs()
+}
+
+func (s *Service) AddWhitelistASN(asn uint32, name string, allowNonID bool) (state.WhitelistASN, error) {
+	if asn == 0 {
+		return state.WhitelistASN{}, fmt.Errorf("asn must be greater than zero")
+	}
+	if _, exists := s.store.GetWhitelistASN(asn); exists {
+		return state.WhitelistASN{}, fmt.Errorf("AS%d is already whitelisted", asn)
+	}
+
+	registered := s.store.IsIDASNRegistered(asn)
+	if s.StrictIDWhitelist() && !registered && !allowNonID {
+		if s.store.CountIDASNRegistry() == 0 {
+			return state.WhitelistASN{}, fmt.Errorf("Indonesian ASN registry is empty; run \"Import Indonesian ASNs\" first")
+		}
+		return state.WhitelistASN{}, fmt.Errorf("AS%d is not registered to Indonesia in RIR delegation data; enable allow_non_id to override", asn)
+	}
+
+	country := "NON-ID"
+	if registered {
+		country = "ID"
+	}
+	entry := state.WhitelistASN{
+		ID:      newResourceID("asn"),
+		ASN:     asn,
+		Name:    name,
+		Country: country,
+		Source:  "manual",
+		Enabled: true,
+	}
+	created, err := s.store.CreateWhitelistASN(entry)
+	if err != nil {
+		return state.WhitelistASN{}, err
+	}
+	_ = s.store.AddEvent("whitelist.create", fmt.Sprintf("whitelisted AS%d", asn), "")
+	s.PushConfigToAll()
+	return created, nil
+}
+
+func (s *Service) DeleteWhitelistASN(id string) error {
+	if err := s.store.DeleteWhitelistASN(id); err != nil {
+		return err
+	}
+	_ = s.store.AddEvent("whitelist.delete", fmt.Sprintf("removed whitelist entry %s", id), "")
+	s.PushConfigToAll()
+	return nil
+}
+
+func (s *Service) ToggleWhitelistASN(id string, enabled bool) error {
+	if err := s.store.ToggleWhitelistASN(id, enabled); err != nil {
+		return err
+	}
+	_ = s.store.AddEvent("whitelist.toggle", fmt.Sprintf("toggled whitelist entry %s enabled=%v", id, enabled), "")
+	s.PushConfigToAll()
+	return nil
+}
+
+// ImportIndonesianASNs downloads the APNIC delegation file and replaces the
+// APNIC-sourced portion of the whitelist with all Indonesian ASNs. Manual
+// entries are preserved.
+func (s *Service) ImportIndonesianASNs(ctx context.Context) (created int, total int, err error) {
+	type nameResult struct {
+		names map[uint32]string
+		err   error
+	}
+	nameCh := make(chan nameResult, 1)
+	go func() {
+		names, nameErr := s.asnNames.Fetch(ctx)
+		nameCh <- nameResult{names: names, err: nameErr}
+	}()
+
+	asns, err := s.idASNs.Fetch(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	nameRes := <-nameCh
+	if nameRes.err != nil {
+		log.Printf("asn names unavailable: %v", nameRes.err)
+		_ = s.store.AddEvent("whitelist.import_warning", "ASN holder names unavailable: "+nameRes.err.Error(), "")
+	}
+
+	if err := s.store.ReplaceIDASNRegistry(asns); err != nil {
+		return 0, 0, fmt.Errorf("cache Indonesian ASN registry: %w", err)
+	}
+	now := time.Now().UTC()
+	entries := make([]state.WhitelistASN, 0, len(asns))
+	for _, asn := range asns {
+		entries = append(entries, state.WhitelistASN{
+			ID:        newResourceID("asn"),
+			ASN:       asn,
+			Name:      nameRes.names[asn],
+			Country:   "ID",
+			Source:    "rir",
+			Enabled:   true,
+			CreatedAt: now,
+		})
+	}
+	// "apnic" is the legacy bucket from earlier single-RIR imports.
+	created, err = s.store.ReplaceWhitelistBySources([]string{"rir", "apnic"}, entries)
+	if err != nil {
+		return created, len(asns), err
+	}
+	_ = s.store.AddEvent("whitelist.import", fmt.Sprintf("imported %d Indonesian ASNs (requested %d)", created, len(asns)), "")
+	if warnings := s.idASNs.Warnings(); len(warnings) > 0 {
+		_ = s.store.AddEvent("whitelist.import_warning", fmt.Sprintf("%d RIR sources failed during import", len(warnings)), "")
+	}
+	s.PushConfigToAll()
+	return created, len(asns), nil
+}
+
 func (s *Service) CreateSource(src state.Source) error {
 	if src.ID == "" {
 		src.ID = newResourceID("src")
@@ -372,20 +572,22 @@ func (s *Service) TriggerExcludeSourceSync(sourceID string) {
 	if !ok {
 		return
 	}
-	go s.syncExcludeSource(src)
+	go s.runSync("exclude:"+src.ID, src.Interval, true, func() error { return s.syncExcludeSource(src) })
 }
 
-func (s *Service) syncExcludeSource(src state.Source) {
+func (s *Service) syncExcludeSource(src state.Source) error {
 	log.Printf("syncing exclude source %s (%s)", src.Name, src.URL)
 	cidrs, err := s.fetcher.Fetch(context.Background(), src.URL, src.Interval)
 	if err != nil {
 		log.Printf("sync error for exclude source %s: %v", src.Name, err)
 		_ = s.store.AddEvent("exclude_source.sync_error", fmt.Sprintf("sync failed for %s: %v", src.Name, err), "")
-		return
+		_ = s.store.SetExcludeSourceSyncError(src.ID, err.Error())
+		return err
 	}
 	if err := s.store.ReplaceExcludeSourcePrefixes(src.ID, cidrs); err != nil {
 		log.Printf("sync replace error for exclude source %s: %v", src.Name, err)
-		return
+		_ = s.store.SetExcludeSourceSyncError(src.ID, err.Error())
+		return err
 	}
 	if err := s.store.SetExcludeSourceSyncResult(src.ID, len(cidrs)); err != nil {
 		log.Printf("sync result update error for exclude source %s: %v", src.Name, err)
@@ -393,6 +595,7 @@ func (s *Service) syncExcludeSource(src state.Source) {
 	_ = s.store.AddEvent("exclude_source.sync", fmt.Sprintf("synced %s: %d excludes", src.Name, len(cidrs)), "")
 	log.Printf("synced exclude source %s: %d excludes", src.Name, len(cidrs))
 	s.PushConfigToAll()
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -468,24 +671,26 @@ func (s *Service) TriggerSync(sourceID string) {
 		log.Printf("sync: source %s not found", sourceID)
 		return
 	}
-	go s.syncSource(src)
+	go s.runSync("source:"+src.ID, src.Interval, true, func() error { return s.syncSource(src) })
 }
 
 // syncSource fetches URLs, parses prefixes, replaces in store, and logs an event.
-func (s *Service) syncSource(src state.Source) {
+func (s *Service) syncSource(src state.Source) error {
 	log.Printf("syncing source %s (%s)", src.Name, src.URL)
 
 	cidrs, err := s.fetcher.Fetch(context.Background(), src.URL, src.Interval)
 	if err != nil {
 		log.Printf("sync error for source %s: %v", src.Name, err)
 		_ = s.store.AddEvent("source.sync_error", fmt.Sprintf("sync failed for %s: %v", src.Name, err), "")
-		return
+		_ = s.store.SetSourceSyncError(src.ID, err.Error())
+		return err
 	}
 
 	if err := s.store.ReplaceSourcePrefixes(src.ID, cidrs); err != nil {
 		log.Printf("sync replace error for source %s: %v", src.Name, err)
 		_ = s.store.AddEvent("source.sync_error", fmt.Sprintf("replace failed for %s: %v", src.Name, err), "")
-		return
+		_ = s.store.SetSourceSyncError(src.ID, err.Error())
+		return err
 	}
 
 	if err := s.store.SetSourceSyncResult(src.ID, len(cidrs)); err != nil {
@@ -497,6 +702,7 @@ func (s *Service) syncSource(src state.Source) {
 
 	// Push updated config to all agents since effective prefixes may have changed
 	s.PushConfigToAll()
+	return nil
 }
 
 // syncScheduler ticks every tickSec seconds and syncs sources that are due.
@@ -520,6 +726,19 @@ func (s *Service) syncScheduler(ctx context.Context) {
 	}
 }
 
+// runSync runs one source sync unless it is already running or, for
+// scheduled syncs, still backing off after failures. Manual syncs (force)
+// skip the backoff wait.
+func (s *Service) runSync(key string, intervalSec int, force bool, fn func() error) {
+	if !s.backoff.begin(key, force, time.Now()) {
+		return
+	}
+	err := fn()
+	if delay := s.backoff.end(key, err, intervalSec, time.Now()); delay > 0 {
+		log.Printf("sync %s failed; next scheduled retry in %s", key, delay)
+	}
+}
+
 // syncDueSources syncs all enabled sources whose interval has elapsed since last sync.
 func (s *Service) syncDueSources() {
 	now := time.Now().UTC()
@@ -531,7 +750,7 @@ func (s *Service) syncDueSources() {
 		if src.LastSync != nil && now.Sub(*src.LastSync) < time.Duration(src.Interval)*time.Second {
 			continue
 		}
-		go s.syncSource(src)
+		go s.runSync("source:"+src.ID, src.Interval, false, func() error { return s.syncSource(src) })
 	}
 
 	for _, src := range s.store.ListExcludeSources() {
@@ -541,7 +760,7 @@ func (s *Service) syncDueSources() {
 		if src.LastSync != nil && now.Sub(*src.LastSync) < time.Duration(src.Interval)*time.Second {
 			continue
 		}
-		go s.syncExcludeSource(src)
+		go s.runSync("exclude:"+src.ID, src.Interval, false, func() error { return s.syncExcludeSource(src) })
 	}
 }
 
@@ -550,8 +769,52 @@ func (s *Service) syncDueSources() {
 // ---------------------------------------------------------------------------
 
 // HandleHeartbeat updates agent heartbeat in store.
-func (s *Service) HandleHeartbeat(agentID string, prefixCount, peerCount int, birdStatus string) {
+func (s *Service) HandleHeartbeat(agentID string, prefixCount, peerCount int, birdStatus, engine string, sessions []state.BGPSession) {
 	_ = s.store.UpdateAgentHeartbeat(agentID, birdStatus, prefixCount, peerCount)
+	if err := s.store.ReplaceAgentBGPSessions(agentID, engine, sessions); err != nil {
+		log.Printf("store BGP sessions for agent %s: %v", agentID, err)
+	}
+}
+
+// BGPOverview summarises live BGP sessions reported by all agents.
+type BGPOverview struct {
+	Agents      int                `json:"agents"`
+	Sessions    int                `json:"sessions"`
+	Established int                `json:"established"`
+	PrefixesIn  int                `json:"prefixes_in"`
+	PrefixesOut int                `json:"prefixes_out"`
+	Engines     map[string]string  `json:"engines"`
+	Items       []state.BGPSession `json:"items"`
+}
+
+func (s *Service) BGPOverview() BGPOverview {
+	sessions := s.store.ListAgentBGPSessions()
+	engines := s.store.AgentBGPEngines()
+	overview := BGPOverview{
+		Engines:  engines,
+		Items:    sessions,
+		Sessions: len(sessions),
+	}
+	agents := make(map[string]struct{})
+	for _, sess := range sessions {
+		agents[sess.AgentID] = struct{}{}
+		if strings.EqualFold(sess.State, "established") {
+			overview.Established++
+			overview.PrefixesIn += sess.PrefixesIn
+			overview.PrefixesOut += sess.PrefixesOut
+		}
+	}
+	for id := range engines {
+		agents[id] = struct{}{}
+	}
+	overview.Agents = len(agents)
+	if overview.Items == nil {
+		overview.Items = []state.BGPSession{}
+	}
+	if overview.Engines == nil {
+		overview.Engines = map[string]string{}
+	}
+	return overview
 }
 
 // HandleRegister registers an agent in the store.
@@ -578,3 +841,73 @@ func newResourceID(kind string) string {
 }
 
 func timePtr(t time.Time) *time.Time { return &t }
+
+// ---------------------------------------------------------------------------
+// Agent enrollment tokens
+// ---------------------------------------------------------------------------
+
+// ErrAgentUnauthorized is returned when an agent's token is missing, unknown,
+// revoked, or bound to a different agent.
+var ErrAgentUnauthorized = errors.New("agent token missing, revoked, or issued to another agent")
+
+func hashAgentToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// CreateAgentToken issues a token for one new agent. The plain token is only
+// returned here; the store keeps its hash.
+func (s *Service) CreateAgentToken(name string) (state.AgentToken, string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return state.AgentToken{}, "", errors.New("name is required")
+	}
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return state.AgentToken{}, "", err
+	}
+	plain := "rtbh_" + hex.EncodeToString(b)
+	t := state.AgentToken{ID: newResourceID("atok"), Name: name, CreatedAt: time.Now().UTC()}
+	if err := s.store.CreateAgentToken(t, hashAgentToken(plain)); err != nil {
+		return state.AgentToken{}, "", err
+	}
+	return t, plain, nil
+}
+
+func (s *Service) ListAgentTokens() []state.AgentToken { return s.store.ListAgentTokens() }
+
+// ValidAgentToken reports whether token exists, without binding it. Used to
+// gate the agent binary download.
+func (s *Service) ValidAgentToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	_, ok := s.store.AgentTokenByHash(hashAgentToken(token))
+	return ok
+}
+
+// AuthorizeAgent checks token for agentID and binds it on first use, so one
+// token enrolls exactly one node.
+func (s *Service) AuthorizeAgent(token, agentID string) error {
+	if token == "" {
+		return ErrAgentUnauthorized
+	}
+	t, ok := s.store.AgentTokenByHash(hashAgentToken(token))
+	if !ok || (t.AgentID != "" && t.AgentID != agentID) {
+		return ErrAgentUnauthorized
+	}
+	return s.store.TouchAgentToken(t.ID, agentID)
+}
+
+// RevokeAgentToken deletes the token and drops the bound agent's config
+// stream; its reconnect is then refused.
+func (s *Service) RevokeAgentToken(id string) error {
+	agentID, err := s.store.DeleteAgentToken(id)
+	if err != nil {
+		return err
+	}
+	if agentID != "" {
+		s.UnregisterStream(agentID)
+	}
+	return nil
+}

@@ -30,6 +30,23 @@ message HeartbeatRequest {
     int32 prefix_count = 3;
     int32 peer_count = 4;
     string bird_status = 5;
+    // Embedded BGP server telemetry. Empty when the agent runs BIRD.
+    repeated BgpSession bgp_sessions = 6;
+    string bgp_engine = 7;
+}
+
+message BgpSession {
+    string peer = 1;
+    string name = 2;
+    uint32 remote_as = 3;
+    uint32 local_as = 4;
+    string state = 5;
+    bool passive = 6;
+    int64 uptime_sec = 7;
+    int32 prefixes_in = 8;
+    string last_error = 9;
+    // Prefixes currently announced to this peer.
+    int32 prefixes_out = 10;
 }
 
 message HeartbeatResponse {
@@ -52,6 +69,10 @@ message ConfigUpdate {
     repeated PeerConfig peers = 2;
     BirdConfig bird = 3;
     int64 version = 4;
+    // allowed_asns is the enabled ASN whitelist. Agents using the embedded BGP
+    // server accept inbound peering sessions from these ASNs.
+    repeated uint32 allowed_asns = 5;
+    bool auto_accept = 6;
 }
 
 message PeerConfig {

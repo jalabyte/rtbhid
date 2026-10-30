@@ -18,10 +18,23 @@
       content="Remote Triggered Black Hole Controller for DDoS mitigation"
     />
     <meta property="og:type" content="website" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>RTBH Portal - Remote Triggered Black Hole Controller</title>
-    <script type="module" crossorigin src="/assets/index-C3ms9fnY.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-oARE0BFd.css">
+    <link rel="icon" href="/favicon.ico?v=nw1" sizes="48x48" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=nw1" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=nw1" />
+    <link rel="manifest" href="/site.webmanifest?v=nw1" />
+    <title>Nullwell</title>
+    <script>
+      // Apply the saved or OS theme before first paint (see src/lib/theme.ts).
+      try {
+        var t = localStorage.getItem("rtbh-theme");
+        if (t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches))
+          document.documentElement.classList.add("dark");
+        if (localStorage.getItem("rtbh-text-size") === "large")
+          document.documentElement.classList.add("text-large");
+      } catch (e) {}
+    </script>
+    <script type="module" crossorigin src="/assets/index-Ci6zUcHq.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-E-EFECW5.css">
   </head>
   <body>
     <div id="root"></div>

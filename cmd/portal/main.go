@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,6 +31,12 @@ func main() {
 	tickSec := getEnvInt("RTBH_SCHEDULER_TICK_SECONDS", 15)
 	grpcMaxMsgSize := getEnvInt("RTBH_GRPC_MAX_MSG_SIZE", 0)
 	ipinfoToken := getEnv("RTBH_IPINFO_TOKEN", "")
+	autoAccept := getEnvBool("RTBH_BGP_AUTO_ACCEPT", true)
+	strictID := getEnvBool("RTBH_WHITELIST_STRICT_ID", true)
+	idASNURL := getEnv("RTBH_ID_ASN_SOURCE_URL", "")
+	idASNURLs := splitList(getEnv("RTBH_ID_ASN_SOURCE_URLS", ""))
+	asnNameURL := getEnv("RTBH_ASN_NAME_SOURCE_URL", "")
+	metricsToken := getEnv("RTBH_METRICS_TOKEN", "")
 
 	authCfg := httpapi.AuthConfig{
 		Enabled:       os.Getenv("RTBH_AUTH_USER") != "",
@@ -48,6 +55,16 @@ func main() {
 
 	fetcher := syncer.NewFetcher("rtbhid-portal/1.0")
 	svc := portal.NewService(store, fetcher, localASN, tickSec, ipinfoToken)
+	svc.SetAutoAccept(autoAccept)
+	svc.SetStrictIDWhitelist(strictID)
+	if len(idASNURLs) > 0 {
+		svc.SetIDASNSourceURLs(idASNURLs)
+	} else if idASNURL != "" {
+		svc.SetIDASNSourceURL(idASNURL)
+	}
+	if asnNameURL != "" {
+		svc.SetASNNameSourceURL(asnNameURL)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -71,6 +88,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("init http server: %v", err)
 	}
+	httpServer.SetMetricsToken(metricsToken)
+	httpServer.SetAgentInstall(httpapi.AgentInstallConfig{
+		PortalURL: getEnv("RTBH_AGENT_PORTAL_URL", ""),
+		PortalTLS: getEnvBool("RTBH_AGENT_PORTAL_TLS", true),
+		BinaryDir: getEnv("RTBH_AGENT_BINARY_DIR", ""),
+		LocalASN:  localASN,
+	})
 	srv := &http.Server{
 		Addr:              listenAddr,
 		Handler:           httpServer.Handler(),
@@ -89,6 +113,11 @@ func main() {
 	fmt.Printf("portal gRPC max msg size: %d bytes\n", grpcMaxMsgSize)
 	fmt.Printf("database: %s\n", dbPath)
 	fmt.Printf("local ASN: %d\n", localASN)
+	if metricsToken != "" {
+		fmt.Printf("/metrics authentication: bearer token enabled\n")
+	} else {
+		fmt.Printf("/metrics authentication: disabled (set RTBH_METRICS_TOKEN to enable)\n")
+	}
 	if ipinfoToken != "" {
 		fmt.Printf("ipinfo.io ASN lookup: enabled\n")
 	} else {
@@ -119,4 +148,25 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	return v == "true" || v == "1" || v == "yes"
+}
+
+func splitList(raw string) []string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t'
+	})
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

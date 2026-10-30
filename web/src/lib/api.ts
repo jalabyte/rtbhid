@@ -1,25 +1,54 @@
 const BASE = "/api/v1";
 
-async function fetchJSON<T>(url: string): Promise<T> {
-  const res = await fetch(`${BASE}${url}`);
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+// request is the single fetch path: an expired session sends the browser to
+// the login page instead of rendering empty tables, and {"error": "..."}
+// bodies become readable Error messages.
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${url}`, init);
+  if (res.status === 401 && !url.startsWith("/auth/")) {
+    window.location.assign("/login");
+    throw new Error("Session expired, redirecting to login");
+  }
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = text.trim() || `${res.status} ${res.statusText}`;
+    try {
+      const body = JSON.parse(text);
+      if (typeof body?.error === "string") msg = body.error;
+    } catch {
+      // plain-text error body
+    }
+    throw new Error(msg);
+  }
+  return (text ? JSON.parse(text) : {}) as T;
 }
 
-async function postJSON<T>(url: string, data: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, {
-    method: "POST",
+const fetchJSON = <T>(url: string) => request<T>(url);
+
+const sendJSON = <T>(method: string, url: string, data: unknown) =>
+  request<T>(url, {
+    method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+
+const postJSON = <T>(url: string, data: unknown) => sendJSON<T>("POST", url, data);
+const putJSON = <T>(url: string, data: unknown) => sendJSON<T>("PUT", url, data);
+const deleteJSON = <T>(url: string) => request<T>(url, { method: "DELETE" });
+
+export interface AgentToken {
+  id: string;
+  name: string;
+  agent_id: string;
+  created_at: string;
+  last_used_at: string | null;
 }
 
-async function deleteJSON<T>(url: string): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, { method: "DELETE" });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+export interface AgentTokenList {
+  items: AgentToken[];
+  portal_url: string;
+  install_url: string;
+  binaries: { amd64: boolean; arm64: boolean };
 }
 
 export interface Agent {
@@ -51,6 +80,7 @@ export interface Source {
   last_sync: string | null;
   last_count: number;
   created_at: string;
+  last_error?: string;
 }
 
 export interface Exclude {
@@ -87,8 +117,54 @@ export interface Status {
   sources: number;
   excludes: number;
   peers: number;
+  whitelist?: number;
+  auto_accept?: boolean;
   effective_prefixes: number;
   local_asn: number;
+}
+
+export interface WhitelistASN {
+  id: string;
+  asn: number;
+  name: string;
+  country: string;
+  source: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface WhitelistResponse {
+  items: WhitelistASN[];
+  count: number;
+  auto_accept: boolean;
+  strict_id: boolean;
+  id_registry_count: number;
+}
+
+export interface BGPSession {
+  agent_id: string;
+  agent_name?: string;
+  peer: string;
+  name: string;
+  remote_as: number;
+  local_as: number;
+  state: string;
+  passive: boolean;
+  uptime_sec: number;
+  prefixes_in: number;
+  prefixes_out?: number;
+  last_error: string;
+  updated_at: string;
+}
+
+export interface BGPOverview {
+  agents: number;
+  sessions: number;
+  established: number;
+  prefixes_in: number;
+  prefixes_out?: number;
+  engines: Record<string, string>;
+  items: BGPSession[];
 }
 
 export interface LookupMatch {
@@ -144,30 +220,26 @@ export const api = {
 
   getAgents: () => fetchJSON<{ items: Agent[] }>("/agents"),
   deleteAgent: (id: string) => deleteJSON(`/agents/${id}`),
+  getAgentTokens: () => fetchJSON<AgentTokenList>("/agent-tokens"),
+  createAgentToken: (name: string) =>
+    postJSON<{ token: string; item: AgentToken }>("/agent-tokens", { name }),
+  revokeAgentToken: (id: string) => deleteJSON(`/agent-tokens/${id}`),
 
   getPrefixes: () => fetchJSON<{ items: Prefix[] }>("/prefixes"),
   addPrefix: (data: { cidr: string; note: string }) =>
     postJSON<Prefix>("/prefixes", data),
   deletePrefix: (id: number) => deleteJSON(`/prefixes/${id}`),
   togglePrefix: (id: number, enabled: boolean) =>
-    fetch(`${BASE}/prefixes/${id}/toggle`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    }),
+    putJSON(`/prefixes/${id}/toggle`, { enabled }),
 
   getSources: () => fetchJSON<{ items: Source[] }>("/sources"),
   addSource: (data: { name: string; url: string; interval: number }) =>
     postJSON<Source>("/sources", data),
   deleteSource: (id: string) => deleteJSON(`/sources/${id}`),
   toggleSource: (id: string, enabled: boolean) =>
-    fetch(`${BASE}/sources/${id}/toggle`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    }),
+    putJSON(`/sources/${id}/toggle`, { enabled }),
   syncSource: (id: string) =>
-    fetch(`${BASE}/sources/${id}/sync`, { method: "POST" }),
+    postJSON(`/sources/${id}/sync`, {}),
 
   getExcludes: () => fetchJSON<{ items: Exclude[] }>("/excludes"),
   addExclude: (data: { cidr: string; note: string }) =>
@@ -179,13 +251,9 @@ export const api = {
     postJSON<Source>("/exclude-sources", data),
   deleteExcludeSource: (id: string) => deleteJSON(`/exclude-sources/${id}`),
   toggleExcludeSource: (id: string, enabled: boolean) =>
-    fetch(`${BASE}/exclude-sources/${id}/toggle`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    }),
+    putJSON(`/exclude-sources/${id}/toggle`, { enabled }),
   syncExcludeSource: (id: string) =>
-    fetch(`${BASE}/exclude-sources/${id}/sync`, { method: "POST" }),
+    postJSON(`/exclude-sources/${id}/sync`, {}),
   getExcludeSourcePrefixes: (offset = 0, limit = 100) =>
     fetchJSON<{
       items: ExcludeSourcePrefix[];
@@ -225,15 +293,33 @@ export const api = {
     }>,
   ) => postJSON<{ created: number }>("/peers/bulk", { items }),
   togglePeer: (id: string, enabled: boolean) =>
-    fetch(`${BASE}/peers/${id}/toggle`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    }),
+    putJSON(`/peers/${id}/toggle`, { enabled }),
   deletePeer: (id: string) => deleteJSON(`/peers/${id}`),
+
+  getWhitelist: () => fetchJSON<WhitelistResponse>("/whitelist"),
+  addWhitelistASN: (data: {
+    asn: number;
+    name: string;
+    allow_non_id?: boolean;
+  }) => postJSON<WhitelistASN>("/whitelist", data),
+  deleteWhitelistASN: (id: string) => deleteJSON(`/whitelist/${id}`),
+  toggleWhitelistASN: (id: string, enabled: boolean) =>
+    putJSON(`/whitelist/${id}/toggle`, { enabled }),
+  importIndonesianASNs: () =>
+    postJSON<{
+      created: number;
+      total: number;
+      count: number;
+      id_registry_count: number;
+      warnings: string[];
+    }>("/whitelist/import", {}),
+  setAutoAccept: (enabled: boolean) =>
+    putJSON(`/whitelist/auto-accept`, { enabled }),
 
   getEvents: (limit = 100) =>
     fetchJSON<{ items: Event[] }>(`/events?limit=${limit}`),
+
+  getBGPOverview: () => fetchJSON<BGPOverview>("/bgp"),
 
   buildPrefixesFromASN: (data: {
     asn: string;
@@ -247,12 +333,5 @@ export const api = {
     postJSON<BulkAddResponse>("/excludes/bulk", data),
 
   lookup: (queries: string[]) =>
-    fetch(`${BASE}/lookup`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ queries }),
-    }).then(async (res) => {
-      if (!res.ok) throw new Error(await res.text());
-      return res.json() as Promise<LookupResponse>;
-    }),
+    postJSON<LookupResponse>("/lookup", { queries }),
 };
